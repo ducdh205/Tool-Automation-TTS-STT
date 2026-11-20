@@ -31,6 +31,7 @@ COLUMNS = {
 }
 _IDX = {k: column_index_from_string(v) - 1 for k, v in COLUMNS.items()}
 _MAX_COL = max(_IDX.values()) + 1
+FORM_COLS = 36  # A..AJ
 
 
 class InputError(Exception):
@@ -72,13 +73,13 @@ def _is_form(ws: Any) -> bool:
 
 def _iter_items(ws: Any, sheet: str) -> Iterator[InputItem]:
     for r, row in enumerate(
-        ws.iter_rows(min_row=FIRST_DATA_ROW, max_col=_MAX_COL, values_only=True), start=FIRST_DATA_ROW
+        ws.iter_rows(min_row=FIRST_DATA_ROW, max_col=FORM_COLS, values_only=True), start=FIRST_DATA_ROW
     ):
-        cells = list(row) + [None] * _MAX_COL
+        cells = (list(row) + [None] * FORM_COLS)[:FORM_COLS]
         values = {k: cell_text(cells[i]) for k, i in _IDX.items()}
         if not values["tc_id"]:
             continue
-        yield InputItem(sheet=sheet, source_row=r, **values)
+        yield InputItem(sheet=sheet, source_row=r, form=[cell_text(c) for c in cells], **values)
 
 
 def is_testcase_form(path: Path, sheet: str) -> bool:

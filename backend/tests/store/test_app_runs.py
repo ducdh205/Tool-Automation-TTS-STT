@@ -67,3 +67,20 @@ def test_results_keep_text_and_audio_snapshot(env):
     assert again["text_tts"] == "bật đèn"
     assert again["audio_path"] == row["audio_path"] and again["audio_path"]
     assert [r["id"] for r in store.pending_for_block2(run_id)][0] == row["id"]
+
+
+def test_create_app_run_with_item_ids(env):
+    store, set_id = env
+    ids = [i["id"] for i in store.get_items(set_id)]
+    run_id = store.create_app_run(set_id, "SER", None, "p", None, item_ids=[ids[1], ids[2]])
+    assert [r["item_id"] for r in store.app_results(run_id)] == [ids[1]]  # ids[2] is audio failed
+
+
+def test_screenshot_path_and_source_row(env):
+    store, set_id = env
+    run_id = store.create_app_run(set_id, "SER", None, "p", None)
+    rid = store.app_results(run_id)[0]["id"]
+    store.record_app_result(rid, AppStatus.FAILED, "x", None, None, "log", screenshot_path="C:/shots/1.png")
+    row = store.get_app_result(rid)
+    assert row["screenshot_path"] == "C:/shots/1.png"
+    assert row["source_row"] == 5 and row["speaker"] == "👤 Người dùng" and row["region"] == "BAC-HN"

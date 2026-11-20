@@ -52,7 +52,8 @@ CREATE TABLE IF NOT EXISTS items (
     status TEXT NOT NULL,
     audio_path TEXT, attempts INTEGER NOT NULL DEFAULT 0,
     ref_text TEXT, wer REAL, cer REAL, ops_json TEXT, error TEXT,
-    updated_at TEXT
+    updated_at TEXT,
+    form_json TEXT
 );
 CREATE INDEX IF NOT EXISTS ix_items_set ON items(audio_set_id, id);
 CREATE TABLE IF NOT EXISTS app_runs (
@@ -68,19 +69,19 @@ CREATE TABLE IF NOT EXISTS app_results (
     status TEXT NOT NULL,
     app_text TEXT, wer REAL, cer REAL, ops_json TEXT, error TEXT, log TEXT,
     updated_at TEXT,
-    text_tts_snap TEXT, audio_snap TEXT
+    text_tts_snap TEXT, audio_snap TEXT, screenshot_path TEXT
 );
 CREATE INDEX IF NOT EXISTS ix_app_results_run ON app_results(app_run_id, id);
 """
 
 _RESULT_SELECT = (
     # text/audio as they were when the run was created: later edits must not change what was tested
-    "SELECT r.*, i.sheet, i.tc_id, i.turn, i.feature, i.priority, i.text_raw,"
+    "SELECT r.*, i.sheet, i.tc_id, i.turn, i.feature, i.priority, i.text_raw, i.source_row, i.speaker,"
+    " i.region, i.expected,"
     " COALESCE(r.text_tts_snap, i.text_tts) AS text_tts, COALESCE(r.audio_snap, i.audio_path) AS audio_path"
     " FROM app_results r JOIN items i ON i.id = r.item_id"
 )
 
-_BLOCK1_TODO = (ItemStatus.PENDING, ItemStatus.GENERATED, ItemStatus.ERROR)
 _RESET_SQL = (
     "audio_path=NULL, attempts=0, ref_text=NULL, wer=NULL, cer=NULL, ops_json=NULL, error=NULL"
 )
@@ -93,6 +94,7 @@ def _now() -> str:
 def _item_row(row: sqlite3.Row) -> dict[str, Any]:
     d = dict(row)
     d["ops"] = json.loads(d.pop("ops_json")) if d.get("ops_json") else []
+    d.pop("form_json", None)  # up to 36 cells per row: only the form export reads it (Store.form_cells)
     return d
 
 
@@ -104,10 +106,13 @@ class Store:
         with self._conn() as c:
             c.execute("PRAGMA journal_mode=WAL")
             c.executescript(SCHEMA)
-            cols = {r["name"] for r in c.execute("PRAGMA table_info(app_results)")}
-            for col in ("text_tts_snap", "audio_snap"):  # databases created before these columns
-                if col not in cols:
-                    c.execute(f"ALTER TABLE app_results ADD COLUMN {col} TEXT")
+            # databases created before these columns
+            for table, added in (("app_results", ("text_tts_snap", "audio_snap", "screenshot_path")),
+                                 ("items", ("form_json",))):
+                cols = {r["name"] for r in c.execute(f"PRAGMA table_info({table})")}
+                for col in added:
+                    if col not in cols:
+                        c.execute(f"ALTER TABLE {table} ADD COLUMN {col} TEXT")
 
     @contextmanager
     def _conn(self) -> Iterator[sqlite3.Connection]:
@@ -139,11 +144,12 @@ class Store:
                     set_id, it.sheet, it.tc_id, it.turn, it.feature, it.priority, it.region,
                     it.speaker, it.expected, it.source_row, it.text_raw, text_tts, reason,
                     0 if reason else 1, status.value, _now(),
+                    json.dumps(it.form, ensure_ascii=False) if it.form else None,
                 ))
             c.executemany(
                 "INSERT INTO items(audio_set_id, sheet, tc_id, turn, feature, priority, region, speaker,"
-                " expected, source_row, text_raw, text_tts, skip_reason, enabled, status, updated_at)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                " expected, source_row, text_raw, text_tts, skip_reason, enabled, status, updated_at, form_json)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 rows,
             )
             return set_id
@@ -183,15 +189,44 @@ class Store:
             r = c.execute("SELECT * FROM items WHERE id=?", (item_id,)).fetchone()
         return _item_row(r) if r else None
 
-    def pending_for_block1(self, audio_set_id: int) -> list[dict[str, Any]]:
-        marks = ",".join("?" * len(_BLOCK1_TODO))
+    def form_cells(self, audio_set_id: int) -> dict[int, list[str]]:
+        """Item id -> the 36 cells of its testcase-form row (items read from other inputs are absent)."""
         with self._conn() as c:
             rows = c.execute(
-                f"SELECT * FROM items WHERE audio_set_id=? AND enabled=1 AND text_tts IS NOT NULL"
-                f" AND status IN ({marks}) ORDER BY id",
-                [audio_set_id, *[s.value for s in _BLOCK1_TODO]],
+                "SELECT id, form_json FROM items WHERE audio_set_id=? AND form_json IS NOT NULL", (audio_set_id,)
             ).fetchall()
-        return [_item_row(r) for r in rows]
+        return {r["id"]: json.loads(r["form_json"]) for r in rows}
+
+    def _select_items(self, audio_set_id: int, item_ids: list[int] | None, where: str,
+                      args: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
+        sql = "SELECT * FROM items WHERE audio_set_id=? AND enabled=1 AND text_tts IS NOT NULL AND " + where
+        params: list[Any] = [audio_set_id, *args]
+        if item_ids is not None:
+            if not item_ids:
+                return []
+            sql += f" AND id IN ({','.join('?' * len(item_ids))})"
+            params += list(item_ids)
+        with self._conn() as c:
+            return [_item_row(r) for r in c.execute(sql + " ORDER BY id", params).fetchall()]
+
+    def items_for_generate(self, audio_set_id: int, item_ids: list[int] | None) -> list[dict[str, Any]]:
+        """Rows without audio yet (new, edited, or failed while synthesizing)."""
+        return self._select_items(audio_set_id, item_ids, "audio_path IS NULL AND status IN (?,?)",
+                                  (ItemStatus.PENDING.value, ItemStatus.ERROR.value))
+
+    def items_for_regenerate(self, audio_set_id: int, item_ids: list[int] | None) -> list[dict[str, Any]]:
+        """Rows with audio; without a selection only the ones whose audio failed verification."""
+        if item_ids is not None:
+            return self._select_items(audio_set_id, item_ids, "audio_path IS NOT NULL")
+        return self._select_items(audio_set_id, None, "audio_path IS NOT NULL AND status=?",
+                                  (ItemStatus.AUDIO_FAILED.value,))
+
+    def items_for_verify(self, audio_set_id: int, item_ids: list[int] | None) -> list[dict[str, Any]]:
+        """Rows with audio; without a selection only the ones not verified yet (or whose STT failed)."""
+        if item_ids is not None:
+            return self._select_items(audio_set_id, item_ids, "audio_path IS NOT NULL")
+        return self._select_items(audio_set_id, None, "audio_path IS NOT NULL AND status IN (?,?)",
+                                  (ItemStatus.GENERATED.value, ItemStatus.ERROR.value))
 
     def set_item_text(self, item_id: int, text_tts: str) -> None:
         with self._conn() as c:
@@ -214,7 +249,8 @@ class Store:
         where, args = self._guard(text_tts)
         with self._conn() as c:
             cur = c.execute(
-                "UPDATE items SET audio_path=?, attempts=?, status=?, error=NULL, updated_at=? WHERE id=?" + where,
+                "UPDATE items SET audio_path=?, attempts=?, status=?, error=NULL, ref_text=NULL, wer=NULL, cer=NULL,"
+                " ops_json=NULL, updated_at=? WHERE id=?" + where,
                 (audio_path, attempts, ItemStatus.GENERATED.value, _now(), item_id, *args),
             )
             return cur.rowcount > 0
@@ -243,7 +279,8 @@ class Store:
 
     # -- block 2 (app runs) ------------------------------------------------
     def create_app_run(
-        self, audio_set_id: int, serial: str, device_model: str | None, profile_name: str, app_version: str | None
+        self, audio_set_id: int, serial: str, device_model: str | None, profile_name: str, app_version: str | None,
+        item_ids: list[int] | None = None,
     ) -> int:
         with self._conn() as c:
             cur = c.execute(
@@ -252,12 +289,14 @@ class Store:
                 (audio_set_id, serial, device_model, profile_name, app_version, _now()),
             )
             run_id = int(cur.lastrowid)
-            c.execute(
-                "INSERT INTO app_results(app_run_id, item_id, status, updated_at, text_tts_snap, audio_snap)"
-                " SELECT ?, id, ?, ?, text_tts, audio_path FROM items"
-                " WHERE audio_set_id=? AND status=? AND enabled=1 AND audio_path IS NOT NULL ORDER BY id",
-                (run_id, AppStatus.PENDING.value, _now(), audio_set_id, ItemStatus.PASSED.value),
-            )
+            sql = ("INSERT INTO app_results(app_run_id, item_id, status, updated_at, text_tts_snap, audio_snap)"
+                   " SELECT ?, id, ?, ?, text_tts, audio_path FROM items"
+                   " WHERE audio_set_id=? AND status=? AND enabled=1 AND audio_path IS NOT NULL")
+            params: list[Any] = [run_id, AppStatus.PENDING.value, _now(), audio_set_id, ItemStatus.PASSED.value]
+            if item_ids is not None:
+                sql += f" AND id IN ({','.join('?' * len(item_ids)) or 'NULL'})"
+                params += list(item_ids)
+            c.execute(sql + " ORDER BY id", params)
             return run_id
 
     def get_app_run(self, run_id: int) -> dict[str, Any] | None:
@@ -285,15 +324,15 @@ class Store:
 
     def record_app_result(
         self, result_id: int, status: AppStatus, app_text: str | None, result: CompareResult | None,
-        error: str | None, log: str,
+        error: str | None, log: str, screenshot_path: str | None = None,
     ) -> None:
         with self._conn() as c:
             c.execute(
-                "UPDATE app_results SET status=?, app_text=?, wer=?, cer=?, ops_json=?, error=?, log=?, updated_at=?"
-                " WHERE id=?",
+                "UPDATE app_results SET status=?, app_text=?, wer=?, cer=?, ops_json=?, error=?, log=?,"
+                " screenshot_path=?, updated_at=? WHERE id=?",
                 (status.value, app_text, result.wer if result else None, result.cer if result else None,
                  json.dumps(result.ops_as_dicts(), ensure_ascii=False) if result else None,
-                 error, log, _now(), result_id),
+                 error, log, screenshot_path, _now(), result_id),
             )
 
     def app_summary(self, run_id: int) -> dict[str, int]:

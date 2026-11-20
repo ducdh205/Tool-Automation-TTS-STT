@@ -84,16 +84,104 @@ def test_record_verify_saves_scores(store, set_id):
     assert row["status"] == ItemStatus.AUDIO_FAILED.value
 
 
-def test_pending_for_block1(store, set_id):
+def test_generate_queue_retries_errors_and_skips_disabled(store, set_id):
     item = store.get_items(set_id, ItemStatus.PENDING)[0]
-    assert [i["id"] for i in store.pending_for_block1(set_id)] == [item["id"]]
+    assert [i["id"] for i in store.items_for_generate(set_id, None)] == [item["id"]]
     store.record_error(item["id"], "boom")
     assert store.get_item(item["id"])["status"] == ItemStatus.ERROR.value
-    assert len(store.pending_for_block1(set_id)) == 1  # errors are retried
+    assert len(store.items_for_generate(set_id, None)) == 1  # errors are retried
     store.set_enabled(item["id"], False)
-    assert store.pending_for_block1(set_id) == []
+    assert store.items_for_generate(set_id, None) == []
 
 
 def test_persists_across_instances(tmp_path, set_id, store):
     again = Store(tmp_path / "tool.db")
     assert again.summary(set_id) == store.summary(set_id)
+
+
+@pytest.fixture
+def staged(store):
+    """Three items: A no audio, B generated, C verified as audio failed."""
+    set_id = store.create_audio_set("b", "f.xlsx", ["S1"], "v",
+                                    [_item("A", "bật đèn"), _item("B", "tắt đèn"), _item("C", "mở cốp")])
+    a, b, c = (i["id"] for i in store.get_items(set_id))
+    store.record_generated(b, "b.wav", 1)
+    store.record_generated(c, "c.wav", 1)
+    store.record_verify(c, "mở cố", compare("mở cốp", "mở cố"), ItemStatus.AUDIO_FAILED)
+    return set_id, (a, b, c)
+
+
+def _ids(rows):
+    return [r["id"] for r in rows]
+
+
+def test_selection_queries(store, staged):
+    set_id, (a, b, c) = staged
+    assert _ids(store.items_for_generate(set_id, None)) == [a]
+    assert _ids(store.items_for_generate(set_id, [b, c])) == []
+    assert _ids(store.items_for_verify(set_id, None)) == [b]
+    assert _ids(store.items_for_verify(set_id, [a, c])) == [c]
+    assert _ids(store.items_for_regenerate(set_id, None)) == [c]
+    assert _ids(store.items_for_regenerate(set_id, [b])) == [b]
+
+
+def test_selection_ignores_other_sets_and_disabled(store, staged):
+    set_id, (a, b, c) = staged
+    other = store.create_audio_set("o", "f.xlsx", ["S1"], "v", [_item("Z", "đóng cốp")])
+    z = store.get_items(other)[0]["id"]
+    assert _ids(store.items_for_generate(set_id, [a, z])) == [a]
+    store.set_enabled(a, False)
+    assert _ids(store.items_for_generate(set_id, None)) == []
+
+
+def test_error_items_split_by_audio(store, staged):
+    set_id, (a, b, c) = staged
+    store.record_error(a, "tts hỏng")
+    store.record_error(b, "stt hỏng")
+    assert _ids(store.items_for_generate(set_id, None)) == [a]
+    assert _ids(store.items_for_verify(set_id, None)) == [b]
+
+
+def test_record_generated_clears_verify(store, staged):
+    _, (_, _, c) = staged
+    store.record_generated(c, "c2.wav", 2)
+    it = store.get_item(c)
+    assert it["status"] == ItemStatus.GENERATED.value
+    assert it["ref_text"] is None and it["wer"] is None and it["cer"] is None and it["ops"] == []
+    assert it["attempts"] == 2
+
+
+def test_form_cells_kept_but_not_in_payload(store):
+    form = [""] * 36
+    form[12] = "Bật ionizer"
+    item = _item("TC-1", "Bật ionizer")
+    item.form = form
+    set_id = store.create_audio_set("f", "f.xlsx", ["S1"], "v", [item, _item("TC-2", "tắt")])
+    first, second = (i["id"] for i in store.get_items(set_id))
+    cells = store.form_cells(set_id)
+    assert cells[first][12] == "Bật ionizer"
+    assert second not in cells
+    assert "form_json" not in store.get_item(first) and "form" not in store.get_item(first)
+
+
+def test_migrates_old_schema(tmp_path):
+    import sqlite3
+
+    path = tmp_path / "old.db"
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        "CREATE TABLE items (id INTEGER PRIMARY KEY, audio_set_id INTEGER NOT NULL, sheet TEXT, tc_id TEXT,"
+        " turn TEXT, feature TEXT, priority TEXT, region TEXT, speaker TEXT, expected TEXT, source_row INTEGER,"
+        " text_raw TEXT, text_tts TEXT, skip_reason TEXT, enabled INTEGER NOT NULL DEFAULT 1, status TEXT NOT NULL,"
+        " audio_path TEXT, attempts INTEGER NOT NULL DEFAULT 0, ref_text TEXT, wer REAL, cer REAL, ops_json TEXT,"
+        " error TEXT, updated_at TEXT);"
+        "CREATE TABLE app_results (id INTEGER PRIMARY KEY, app_run_id INTEGER NOT NULL, item_id INTEGER NOT NULL,"
+        " status TEXT NOT NULL, app_text TEXT, wer REAL, cer REAL, ops_json TEXT, error TEXT, log TEXT,"
+        " updated_at TEXT);"
+    )
+    conn.close()
+    Store(path)
+    conn = sqlite3.connect(path)
+    assert "form_json" in {r[1] for r in conn.execute("PRAGMA table_info(items)")}
+    assert "screenshot_path" in {r[1] for r in conn.execute("PRAGMA table_info(app_results)")}
+    conn.close()

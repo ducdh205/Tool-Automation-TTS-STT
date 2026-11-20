@@ -50,3 +50,12 @@ def test_sample_file_has_3986_items():
     sheets = [s.name for s in list_sheets(SAMPLE_XLSX) if s.is_testcase and s.item_count > 0]
     assert len(sheets) == 14
     assert len(read_testcase_items(SAMPLE_XLSX, sheets)) == 3986
+
+
+def test_form_cells_are_kept(mini_form):
+    items = read_testcase_items(mini_form, [FORM_SHEET])
+    assert len(items[0].form) == 36
+    assert items[0].form[0] == "TC-SYN-001"
+    assert items[0].form[2] == "UC"
+    assert items[0].form[12] == "Đồng bộ nhiệt độ tất cả các vùng"
+    assert items[0].form[35] == ""
