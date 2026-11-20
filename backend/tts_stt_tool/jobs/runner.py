@@ -11,7 +11,7 @@ from typing import Any, Literal
 
 _LOG = logging.getLogger(__name__)
 
-EventKind = Literal["item", "progress", "done", "error", "cancelled"]
+EventKind = Literal["item", "progress", "log", "done", "error", "cancelled"]
 TERMINAL = ("done", "error", "cancelled")
 
 

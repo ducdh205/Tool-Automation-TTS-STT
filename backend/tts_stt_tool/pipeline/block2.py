@@ -9,10 +9,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
+from tts_stt_tool.compare.score import compare
+from tts_stt_tool.config import Settings
 from tts_stt_tool.device.adb import Adb
 from tts_stt_tool.device.player import AudioPlayer
 from tts_stt_tool.device.profile import AppProfile
 from tts_stt_tool.device.ui_tree import UiNode, bubble_labels, find, new_bubble_after, parse_dump
+from tts_stt_tool.jobs.runner import Emit, ProgressEvent
+from tts_stt_tool.store.db import AppStatus, Store
 
 _LOG = logging.getLogger(__name__)
 POLL_S = 0.4
@@ -161,3 +165,53 @@ async def run_one(
     if close:
         await _tap(dev, close, log)
     return AppCapture(text=text, log=log, bubbles=bubbles)
+
+
+MAX_CONSECUTIVE_OP_ERRORS = 5
+
+
+async def run_block2(
+    store: Store,
+    app_run_id: int,
+    dev: DeviceDriver,
+    profile: AppProfile,
+    player: AudioPlayer,
+    settings: Settings,
+    emit: Emit,
+    cancel: asyncio.Event,
+    run_one: Callable[..., Awaitable[AppCapture]] = run_one,
+) -> None:
+    todo = store.pending_for_block2(app_run_id)
+    total = len(todo)
+    prev: list[str] | None = None
+    op_errors = 0
+    for done, row in enumerate(todo):
+        if cancel.is_set():
+            emit(ProgressEvent("", "cancelled", done, total))
+            return
+        label = f"[{done + 1}/{total}] {row['tc_id']}"
+        emit(ProgressEvent("", "log", done, total, message=f"{label}: {row['text_tts']}"))
+        try:
+            cap = await run_one(dev, profile, Path(row["audio_path"]), player, prev_bubbles=prev)
+        except Exception as e:  # OperationError, adb failures: the tool, not the app, failed
+            op_errors += 1
+            msg = str(e) or type(e).__name__
+            store.record_app_result(row["id"], AppStatus.OP_ERROR, None, None, msg, "")
+            emit(ProgressEvent("", "log", done + 1, total, message=f"{label}: Lỗi thao tác — {msg}"))
+            emit(ProgressEvent("", "item", done + 1, total, item=store.get_app_result(row["id"])))
+            prev = None
+            if op_errors >= MAX_CONSECUTIVE_OP_ERRORS:
+                emit(ProgressEvent("", "error", done + 1, total,
+                                   message=f"Dừng sau {MAX_CONSECUTIVE_OP_ERRORS} lỗi thao tác liên tiếp: {msg}"))
+                return
+            continue
+        op_errors = 0
+        prev = cap.bubbles
+        heard = cap.text or ""
+        result = compare(row["text_tts"], heard, settings.wer_threshold)
+        status = AppStatus.PASSED if result.correct else AppStatus.FAILED
+        store.record_app_result(row["id"], status, heard, result, None, "\n".join(cap.log))
+        for line in cap.log:
+            emit(ProgressEvent("", "log", done, total, message=line))
+        emit(ProgressEvent("", "item", done + 1, total, item=store.get_app_result(row["id"])))
+    emit(ProgressEvent("", "done", total, total))
