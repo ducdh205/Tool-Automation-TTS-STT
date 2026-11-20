@@ -69,13 +69,17 @@ def node_at(nodes: list[UiNode], x: int, y: int) -> UiNode | None:
 
 
 def right_bubbles(nodes: list[UiNode], screen_w: int) -> list[UiNode]:
-    """User-side chat bubbles: right-aligned labelled views above the input box, top to bottom."""
+    """User-side chat bubbles: right-aligned labelled views above the input box, top to bottom.
+
+    Assistant messages start at the left margin (x1 = 32 on a 720 px screen); long user
+    bubbles can start as far left as x1 = 156, so the left edge test is 10 % of the width.
+    """
     edits = [n.bounds[1] for n in nodes if n.cls == _EDIT]
     limit = min(edits) if edits else 10**9  # the char counter etc. sit below/inside the input
     out = [
         n for n in nodes
         if n.label and n.cls not in _NOT_BUBBLE and n.bounds[3] <= limit
-        and n.bounds[0] > screen_w * 0.25 and n.bounds[2] > screen_w * 0.75
+        and n.bounds[0] > screen_w * 0.1 and n.bounds[2] > screen_w * 0.75
     ]
     return sorted(out, key=lambda n: n.bounds[1])
 
@@ -84,3 +88,21 @@ def new_bubble(before: list[UiNode], after: list[UiNode], screen_w: int) -> UiNo
     """The transcript bubble added between two dumps (by count, so repeated text still counts)."""
     old, new = right_bubbles(before, screen_w), right_bubbles(after, screen_w)
     return new[-1] if len(new) > len(old) else None
+
+
+def bubble_labels(nodes: list[UiNode], screen_w: int) -> list[str]:
+    return [n.label for n in right_bubbles(nodes, screen_w)]
+
+
+def new_bubble_after(prev: list[str], after: list[UiNode], screen_w: int) -> UiNode | None:
+    """New user bubble compared with the labels seen before.
+
+    The app sometimes keeps the chat when its sheet is reopened and sometimes clears it:
+    a longer list that extends ``prev`` -> its last bubble is new; an identical list -> nothing
+    new; any other list (history was cleared) -> its last bubble is new.
+    """
+    bubbles = right_bubbles(after, screen_w)
+    labels = [b.label for b in bubbles]
+    if not bubbles or labels == prev:
+        return None
+    return bubbles[-1]

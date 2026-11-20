@@ -88,3 +88,23 @@ async def test_dump_ui_gives_up_after_three():
 def test_parse_wm_size_prefers_override():
     assert parse_wm_size("Physical size: 720x1650\n") == (720, 1650)
     assert parse_wm_size("Physical size: 720x1650\nOverride size: 1080x2400\n") == (1080, 2400)
+
+
+# --- real-device findings: long user bubbles start at x=156; history may persist ---
+def test_long_user_bubble_counts_but_assistant_does_not():
+    long_user = UiNode("", "đang làm cái gì đấy Đang làm cái gì cũng được", "android.view.View", (156, 880, 660, 960), False)
+    assistant = UiNode("", "Câu này chưa phải một việc cần làm.", "android.view.View", (32, 1004, 624, 1084), False)
+    assert [n.label for n in right_bubbles([long_user, assistant], 720)] == [long_user.label]
+
+
+def test_new_bubble_by_labels_history_kept():
+    from tts_stt_tool.device.ui_tree import new_bubble_after
+    after = [_bubble("câu cũ", 700), _bubble("câu mới", 900)]
+    assert new_bubble_after(["câu cũ"], after, 720).label == "câu mới"
+    assert new_bubble_after(["câu cũ"], [_bubble("câu cũ", 700)], 720) is None
+
+
+def test_new_bubble_by_labels_history_reset():
+    from tts_stt_tool.device.ui_tree import new_bubble_after
+    assert new_bubble_after(["a", "b"], [_bubble("c", 700)], 720).label == "c"
+    assert new_bubble_after(["a", "b"], [], 720) is None
