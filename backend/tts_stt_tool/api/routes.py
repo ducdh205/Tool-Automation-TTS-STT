@@ -12,6 +12,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
+from starlette.background import BackgroundTask
 
 from tts_stt_tool.api.app import AppContext
 from tts_stt_tool.config import save_settings
@@ -26,6 +27,7 @@ from tts_stt_tool.pipeline.block1 import run_generate, run_verify
 from tts_stt_tool.pipeline.block2 import run_block2
 from tts_stt_tool.report.excel import build_block1_report, export_block1_csv
 from tts_stt_tool.report.form_export import build_form_report
+from tts_stt_tool.report.session_zip import build_session_zip, session_root_name
 from tts_stt_tool.store.db import ItemStatus
 from tts_stt_tool.stt.wyoming_client import WyomingStt
 
@@ -495,6 +497,29 @@ async def form_report(request: Request, run_id: int) -> FileResponse:
     out = ctx.reports / f"KetQua_{_run_file_base(ctx, run)}.xlsx"
     await asyncio.to_thread(build_form_report, ctx.store, run_id, out)
     return FileResponse(out, media_type=XLSX_TYPE, filename=out.name)
+
+
+class ExportZipIn(BaseModel):
+    audio: Literal["failed", "all", "selected"] = "failed"
+    item_ids: list[int] | None = None  # for audio="selected"
+
+
+@router.post("/app-runs/{run_id}/export-zip")
+async def export_zip(request: Request, run_id: int, body: ExportZipIn) -> FileResponse:
+    ctx = ctx_of(request)
+    run = _require_run(ctx, run_id)
+    if body.audio == "selected" and not body.item_ids:
+        raise HTTPException(422, "Chưa chọn case nào")
+    try:
+        profile = get_profile(ctx.profiles_dir, run["profile_name"]).to_json()
+    except KeyError:
+        profile = None
+    name = f"{session_root_name(run)}.zip"
+    out = ctx.reports / f"{uuid.uuid4().hex[:8]}_{name}"  # unique: two exports must not share a file
+    await asyncio.to_thread(build_session_zip, ctx.store, run_id, ctx.settings, out, body.audio,
+                            set(body.item_ids or ()), profile)
+    return FileResponse(out, media_type="application/zip", filename=name,
+                        background=BackgroundTask(out.unlink, missing_ok=True))
 
 
 @router.get("/audio-sets/{set_id}/app-runs")

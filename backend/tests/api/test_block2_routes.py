@@ -159,3 +159,21 @@ def test_form_report_endpoint(ctx):
     assert "spreadsheetml" in r.headers["content-type"]
     assert f"Phien{run_id}.xlsx" in r.headers["content-disposition"]
     assert c.post("/api/app-runs/999/form-report").status_code == 404
+
+
+def test_export_zip_endpoint(ctx):
+    import io
+    import zipfile
+
+    c, app, _, tmp_path = ctx
+    _, run_id = finished_run(c, tmp_path)
+    r = c.post(f"/api/app-runs/{run_id}/export-zip", json={"audio": "selected"})
+    assert r.status_code == 422 and r.json()["detail"] == "Chưa chọn case nào"
+    r = c.post(f"/api/app-runs/{run_id}/export-zip", json={})
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"] == "application/zip"
+    names = zipfile.ZipFile(io.BytesIO(r.content)).namelist()
+    assert any(n.endswith("manhinh.png") for n in names)  # the fake app's answers are wrong -> screenshots
+    assert any(n.endswith("thong_tin_phien.txt") for n in names)
+    assert list(app.state.ctx.reports.glob("*.zip")) == []  # deleted after sending
+    assert c.post("/api/app-runs/999/export-zip", json={}).status_code == 404
