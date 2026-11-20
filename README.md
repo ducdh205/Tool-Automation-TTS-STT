@@ -4,7 +4,8 @@ Công cụ đo tỉ lệ nhận dạng giọng nói (speech-to-text) của app t
 
 - **Khối 1 (đã có):** nạp file testcase → sinh audio bằng **VieNeu-TTS** → **wyoming-vietnamese** nghe lại để
   kiểm tra audio chuẩn → so sánh WER/CER → xuất báo cáo Excel/CSV.
-- **Khối 2 (kế hoạch 2):** phát audio cho điện thoại Android, đọc kết quả app hiển thị và so sánh.
+- **Khối 2 (đã có):** loa máy tính phát audio đã verify, điện thoại Android (cắm USB) nghe bằng micro thật
+  qua app; tool tự bấm mic, đọc câu app nhận được, so sánh WER/CER và báo cáo tỉ lệ đúng của app.
 
 Thiết kế: [docs/superpowers/specs/2026-11-20-tts-stt-automation-design.md](docs/superpowers/specs/2026-11-20-tts-stt-automation-design.md)
 
@@ -66,6 +67,32 @@ Tham số: `--port 9000`, `--no-browser`, `--data-dir <thư mục>`.
 
 **Cài đặt** (thanh trái): giọng đọc (mặc định *Ngọc Huyền* – Nữ, Bắc), số lần sinh lại, ngưỡng WER,
 ngưỡng cảnh báo tỉ lệ loại (10%), thời gian chờ STT.
+
+## Khối 2 — test trên điện thoại
+
+Không cài gì lên điện thoại (chỉ dùng `adb` có sẵn của Android).
+
+1. Tải [Android platform-tools](https://developer.android.com/tools/releases/platform-tools) và giải nén vào
+   `vendor/platform-tools/` (cần `adb.exe`).
+2. Trên điện thoại: bật **Tùy chọn nhà phát triển → Gỡ lỗi USB**, cắm cáp, bấm **Cho phép**.
+   Cột phải của tool hiện màn hình điện thoại (chạm/vuốt được).
+3. Mở app cần test ở **màn hình chính**. Đặt âm lượng loa máy tính ~70%, điện thoại cách loa 20–40 cm,
+   phòng yên tĩnh (app bắt cả tiếng nói xung quanh).
+4. Chạy Khối 1 trước — chỉ câu **Đạt** mới được test trên app.
+5. Thanh trái → **Test app** → chọn thiết bị và hồ sơ app → **Chạy trên app**. Mỗi câu khoảng 13–20 giây.
+   Kết quả: **Đúng / Sai / Lỗi thao tác** (lỗi do tool không điều khiển được app, không tính vào tỉ lệ đúng).
+   **Chạy tiếp** chạy lại các câu Chờ và Lỗi thao tác. **Xuất Excel** khi đang ở mục Test app sẽ kèm sheet
+   *Khối 2 – App* và *Lỗi thao tác*.
+
+**Hồ sơ app** (mặc định *Vita Work (dev)*, `com.vita.suite.dev`): nhãn các nút trên app — mở mic
+"Nói để tạo việc", dừng "Dừng nghe", mic chờ "Bấm để nói", đóng "Đóng". App khác hoặc đổi giao diện:
+bấm **Ghim nút cho hồ sơ app** ở cột phải, chạm lên nút trên màn hình mirror, chọn vai trò để lưu.
+Hồ sơ lưu ở `data/profiles/`.
+
+Cách tool chạy một câu: bấm mic → chờ mic thật sự thu (`dumpsys audio`) → 0,3 s → phát audio → 1 s →
+bấm "Dừng nghe" (nếu app chưa tự dừng) → đọc bong bóng chat mới bên phải (`uiautomator dump`) → bấm "Đóng".
+
+Test trên trình duyệt (Edge, cần server và điện thoại): `uv run python tests/e2e/browser_e2e.py --items 5`.
 
 ## Dữ liệu
 
