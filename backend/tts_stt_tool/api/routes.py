@@ -25,6 +25,7 @@ from tts_stt_tool.jobs.runner import JobBusyError
 from tts_stt_tool.pipeline.block1 import run_generate, run_verify
 from tts_stt_tool.pipeline.block2 import run_block2
 from tts_stt_tool.report.excel import build_block1_report, export_block1_csv
+from tts_stt_tool.report.form_export import build_form_report
 from tts_stt_tool.store.db import ItemStatus
 from tts_stt_tool.stt.wyoming_client import WyomingStt
 
@@ -480,6 +481,20 @@ async def resume_app_run(request: Request, run_id: int) -> dict[str, str]:
     ctx = ctx_of(request)
     run = _require_run(ctx, run_id)
     return {"job_id": _start_block2(ctx, run_id, run["serial"], _profile(ctx, run["profile_name"]))}
+
+
+def _run_file_base(ctx: AppContext, run: dict[str, Any]) -> str:
+    s = ctx.store.get_audio_set(run["audio_set_id"]) or {}
+    return f"{_safe_name(s.get('name') or 'bo-audio')}_Phien{run['id']}"
+
+
+@router.post("/app-runs/{run_id}/form-report")
+async def form_report(request: Request, run_id: int) -> FileResponse:
+    ctx = ctx_of(request)
+    run = _require_run(ctx, run_id)
+    out = ctx.reports / f"KetQua_{_run_file_base(ctx, run)}.xlsx"
+    await asyncio.to_thread(build_form_report, ctx.store, run_id, out)
+    return FileResponse(out, media_type=XLSX_TYPE, filename=out.name)
 
 
 @router.get("/audio-sets/{set_id}/app-runs")

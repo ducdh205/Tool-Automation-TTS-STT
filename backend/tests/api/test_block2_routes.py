@@ -141,3 +141,21 @@ def test_app_run_selection_without_passed_items_is_422(ctx):
     r = c.post(f"/api/audio-sets/{set_id}/app-runs", json={"serial": "SER", "profile": name, "item_ids": skipped})
     assert r.status_code == 422 and r.json()["detail"] == "Không có câu Đạt nào trong các case đã chọn"
     assert len(c.get(f"/api/audio-sets/{set_id}/app-runs").json()) == runs_before
+
+
+def finished_run(c, tmp_path):
+    name = fast_profile(c)
+    set_id = verified_set(c, tmp_path)
+    run_id = c.post(f"/api/audio-sets/{set_id}/app-runs", json={"serial": "SER", "profile": name}).json()["id"]
+    wait_job_end(c)
+    return set_id, run_id
+
+
+def test_form_report_endpoint(ctx):
+    c, _, _, tmp_path = ctx
+    _, run_id = finished_run(c, tmp_path)
+    r = c.post(f"/api/app-runs/{run_id}/form-report")
+    assert r.status_code == 200, r.text
+    assert "spreadsheetml" in r.headers["content-type"]
+    assert f"Phien{run_id}.xlsx" in r.headers["content-disposition"]
+    assert c.post("/api/app-runs/999/form-report").status_code == 404
