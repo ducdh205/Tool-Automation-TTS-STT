@@ -1,15 +1,31 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { api, type AppResult, type Item } from "../api";
 import { formatPct, renderOps } from "../format";
 
 const ROW_H = 34;
+const NONE: ReadonlySet<number> = new Set();
 
 interface Props {
   items: Item[];
   onPatch: (id: number, patch: { text_tts?: string; enabled?: boolean }) => void;
   /** Block 2: results of the selected app run, keyed by item id. Switches the STT columns to the app's. */
   app?: Map<number, AppResult>;
+  /** Case selection (ids). Without `onRowSelect` the checkboxes are inert. */
+  selected?: ReadonlySet<number>;
+  isSelectable?: (it: Item) => boolean;
+  onRowSelect?: (index: number, shift: boolean) => void;
+  onToggleAll?: () => void;
+  /** Step 1: a ⟳ button on rows that have audio. */
+  onRegenerate?: (id: number) => void;
+}
+
+function HeadCheckbox({ checked, indeterminate, disabled, onChange }:
+  { checked: boolean; indeterminate: boolean; disabled: boolean; onChange: () => void }) {
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => { if (ref.current) ref.current.indeterminate = indeterminate; }, [indeterminate]);
+  return <input ref={ref} type="checkbox" aria-label="Chọn tất cả" title="Chọn / bỏ chọn các dòng đang hiển thị"
+    checked={checked} disabled={disabled} onChange={onChange} />;
 }
 
 const STATUS_CLASS: Record<string, string> = {
@@ -82,7 +98,11 @@ function PlayButton({ item }: { item: Item }) {
   return <button className="icon-btn" title="Nghe audio" onClick={play}>▶</button>;
 }
 
-export function ItemTable({ items, onPatch, app }: Props) {
+export function ItemTable({
+  items, onPatch, app, selected = NONE, isSelectable = () => false, onRowSelect, onToggleAll, onRegenerate,
+}: Props) {
+  const selectable = items.filter(isSelectable);
+  const picked = selectable.filter((it) => selected.has(it.id)).length;
   const parentRef = useRef<HTMLDivElement>(null);
   const v = useVirtualizer({
     count: items.length,
@@ -95,9 +115,17 @@ export function ItemTable({ items, onPatch, app }: Props) {
   return (
     <div className="table">
       <div className="row head">
-        <span /><span>#</span><span>Sheet</span><span>TC_ID</span><span>Lượt</span>
+        <span>
+          <HeadCheckbox
+            checked={picked > 0 && picked === selectable.length}
+            indeterminate={picked > 0 && picked < selectable.length}
+            disabled={!onToggleAll || selectable.length === 0}
+            onChange={() => onToggleAll?.()}
+          />
+        </span>
+        <span>#</span><span>Sheet</span><span>TC_ID</span><span>Lượt</span>
         <span>Câu gốc</span><span>Câu đọc</span><span /><span>{app ? "Text app" : "Text STT tham chiếu"}</span>
-        <span className="num">WER</span><span className="num">CER</span><span>Trạng thái</span>
+        <span className="num">WER</span><span className="num">CER</span><span>Trạng thái</span><span />
       </div>
       <div ref={parentRef} className="table-body">
         <div style={{ height: v.getTotalSize(), position: "relative" }}>
@@ -114,10 +142,11 @@ export function ItemTable({ items, onPatch, app }: Props) {
                 <span>
                   <input
                     type="checkbox"
-                    checked={!!it.enabled}
-                    disabled={!it.text_tts}
-                    title={it.text_tts ? "Bật/tắt câu này" : "Sửa câu đọc để bật lại"}
-                    onChange={(e) => onPatch(it.id, { enabled: e.target.checked })}
+                    aria-label={`Chọn ${it.tc_id}`}
+                    checked={selected.has(it.id)}
+                    disabled={!onRowSelect || !isSelectable(it)}
+                    onChange={() => {}}
+                    onClick={(e) => onRowSelect?.(vr.index, e.shiftKey)}
                   />
                 </span>
                 <span className="muted">{vr.index + 1}</span>
@@ -139,6 +168,21 @@ export function ItemTable({ items, onPatch, app }: Props) {
                     <span className={`badge ${STATUS_CLASS[it.status] ?? ""}`} title={it.skip_reason ?? it.error ?? it.status}>
                       {it.status}{it.attempts > 1 ? ` ·${it.attempts}x` : ""}
                     </span>
+                  )}
+                </span>
+                <span className="row-actions">
+                  {onRegenerate && it.audio_path && (
+                    <button className="icon-btn" title="Sinh lại audio" onClick={() => onRegenerate(it.id)}>⟳</button>
+                  )}
+                  {!app && (
+                    <button
+                      className={`icon-btn ${it.enabled ? "" : "off"}`}
+                      title={it.text_tts ? "Bật/tắt câu này" : "Sửa câu đọc để bật lại"}
+                      disabled={!it.text_tts}
+                      onClick={() => onPatch(it.id, { enabled: !it.enabled })}
+                    >
+                      ⏻
+                    </button>
                   )}
                 </span>
               </div>

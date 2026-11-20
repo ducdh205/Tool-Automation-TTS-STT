@@ -48,11 +48,51 @@ describe("ItemTable", () => {
     expect(onPatch).toHaveBeenCalledWith(1, { text_tts: "câu mới" });
   });
 
-  it("toggles enabled via checkbox", () => {
+  it("toggles enabled via the power button", () => {
     const onPatch = vi.fn();
     render(<ItemTable items={[makeItem(0)]} onPatch={onPatch} />);
-    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.click(screen.getByTitle("Bật/tắt câu này"));
     expect(onPatch).toHaveBeenCalledWith(1, { enabled: false });
+  });
+});
+
+describe("selection", () => {
+  const items = [makeItem(0), makeItem(1), makeItem(2, { enabled: 0 })];
+  const selectable = (it: Item) => !!it.enabled;
+
+  it("row checkbox reports the row index and the shift key", () => {
+    const onRowSelect = vi.fn();
+    render(<ItemTable items={items} onPatch={() => {}} selected={new Set()} isSelectable={selectable}
+      onRowSelect={onRowSelect} onToggleAll={() => {}} />);
+    fireEvent.click(screen.getByLabelText("Chọn TC-1"), { shiftKey: true });
+    expect(onRowSelect).toHaveBeenCalledWith(1, true);
+    expect((screen.getByLabelText("Chọn TC-2") as HTMLInputElement).disabled).toBe(true);
+  });
+
+  it("header checkbox is checked / indeterminate from the selectable visible rows", () => {
+    const onToggleAll = vi.fn();
+    const { rerender } = render(<ItemTable items={items} onPatch={() => {}} selected={new Set([1])}
+      isSelectable={selectable} onRowSelect={() => {}} onToggleAll={onToggleAll} />);
+    expect((screen.getByLabelText("Chọn TC-0") as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByLabelText("Chọn TC-1") as HTMLInputElement).checked).toBe(false);
+    const all = screen.getByLabelText("Chọn tất cả") as HTMLInputElement;
+    expect(all.checked).toBe(false);
+    expect(all.indeterminate).toBe(true);
+    fireEvent.click(all);
+    expect(onToggleAll).toHaveBeenCalled();
+    rerender(<ItemTable items={items} onPatch={() => {}} selected={new Set([1, 2])}
+      isSelectable={selectable} onRowSelect={() => {}} onToggleAll={onToggleAll} />);
+    expect((screen.getByLabelText("Chọn tất cả") as HTMLInputElement).checked).toBe(true);
+  });
+
+  it("regenerate button only for rows with audio", () => {
+    const onRegenerate = vi.fn();
+    render(<ItemTable items={[makeItem(0, { audio_path: "a.wav", status: "Audio không đạt" }), makeItem(1)]}
+      onPatch={() => {}} onRegenerate={onRegenerate} />);
+    const buttons = screen.getAllByTitle("Sinh lại audio");
+    expect(buttons).toHaveLength(1);
+    fireEvent.click(buttons[0]);
+    expect(onRegenerate).toHaveBeenCalledWith(1);
   });
 });
 
