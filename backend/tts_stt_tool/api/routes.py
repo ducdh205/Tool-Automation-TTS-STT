@@ -16,11 +16,14 @@ from pydantic import BaseModel, ConfigDict, Field
 from tts_stt_tool.api.app import AppContext
 from tts_stt_tool.config import save_settings
 from tts_stt_tool.device.adb import KEYS, AdbError
+from tts_stt_tool.device.profile import AppProfile, get_profile, list_profiles, save_profile
+from tts_stt_tool.device.ui_tree import node_at, parse_dump
 from tts_stt_tool.input.filters import clean_text, has_words
 from tts_stt_tool.input.generic import ColumnMapping, preview_columns, read_generic
 from tts_stt_tool.input.testcase_form import InputError, list_sheets, read_testcase_items
 from tts_stt_tool.jobs.runner import JobBusyError
 from tts_stt_tool.pipeline.block1 import run_block1
+from tts_stt_tool.pipeline.block2 import run_block2
 from tts_stt_tool.report.excel import build_block1_report, export_block1_csv
 from tts_stt_tool.store.db import ItemStatus
 from tts_stt_tool.stt.wyoming_client import WyomingStt
@@ -313,6 +316,118 @@ async def device_input(request: Request, serial: str, body: DeviceInput) -> dict
     except AdbError as e:
         raise HTTPException(503, str(e)) from e
     return {"ok": True}
+
+
+@router.get("/device/{serial}/node-at")
+async def device_node_at(request: Request, serial: str, x: int, y: int) -> dict[str, Any]:
+    try:
+        nodes = parse_dump(await ctx_of(request).adb.dump_ui(serial))
+    except AdbError as e:
+        raise HTTPException(503, str(e)) from e
+    node = node_at(nodes, x, y)
+    if node is None:
+        raise HTTPException(404, "Không có phần tử nào tại điểm này")
+    return node.to_json()
+
+
+# -- block 2 ------------------------------------------------------------------
+class ProfileIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=80)
+    package: str = Field(min_length=1)
+    open_label: str = Field(min_length=1)
+    stop_label: str = Field(min_length=1)
+    idle_label: str = Field(min_length=1)
+    close_label: str = Field(min_length=1)
+    sheet_label: str = ""
+    pre_delay_s: float = Field(ge=0, le=10)
+    post_delay_s: float = Field(ge=0, le=10)
+    listen_timeout_s: float = Field(gt=0, le=60)
+    result_timeout_s: float = Field(gt=0, le=120)
+
+
+@router.get("/profiles")
+def get_profiles(request: Request) -> list[dict[str, Any]]:
+    return [p.to_json() for p in list_profiles(ctx_of(request).profiles_dir)]
+
+
+@router.put("/profiles/{name}")
+def put_profile(request: Request, name: str, body: ProfileIn) -> dict[str, Any]:
+    p = AppProfile(**{**body.model_dump(), "name": name})
+    save_profile(ctx_of(request).profiles_dir, p)
+    return p.to_json()
+
+
+class AppRunIn(BaseModel):
+    serial: str = Field(min_length=1)
+    profile: str
+
+
+def _start_block2(ctx: AppContext, run_id: int, serial: str, profile: AppProfile) -> str:
+    async def job(emit, cancel) -> None:
+        dev = await ctx.device(serial)
+        await run_block2(ctx.store, run_id, dev, profile, ctx.player, ctx.settings, emit, cancel)
+
+    try:
+        return ctx.runner.start(f"Khối 2 – lần test {run_id}", job)
+    except JobBusyError as e:
+        raise HTTPException(409, str(e)) from e
+
+
+def _profile(ctx: AppContext, name: str) -> AppProfile:
+    try:
+        return get_profile(ctx.profiles_dir, name)
+    except KeyError as e:
+        raise HTTPException(404, f"Không có hồ sơ app '{name}'") from e
+
+
+@router.post("/audio-sets/{set_id}/app-runs")
+async def create_app_run(request: Request, set_id: int, body: AppRunIn) -> dict[str, Any]:
+    ctx = ctx_of(request)
+    _require_set(ctx, set_id)
+    profile = _profile(ctx, body.profile)
+    if ctx.runner.current() is not None:
+        raise HTTPException(409, f"Đang chạy: {ctx.runner.current()['name']}")
+    if not ctx.store.summary(set_id).get(ItemStatus.PASSED.value):
+        raise HTTPException(422, "Bộ audio chưa có câu Đạt — chạy Khối 1 trước")
+    model = version = None
+    if ctx.device_factory is None and ctx.adb.available:
+        try:
+            model = next((d.model for d in await ctx.adb.devices() if d.serial == body.serial), None)
+            version = await ctx.adb.app_version(body.serial, profile.package)
+        except AdbError:
+            pass
+    run_id = ctx.store.create_app_run(set_id, body.serial, model, profile.name, version)
+    return {"id": run_id, "job_id": _start_block2(ctx, run_id, body.serial, profile)}
+
+
+def _require_run(ctx: AppContext, run_id: int) -> dict[str, Any]:
+    run = ctx.store.get_app_run(run_id)
+    if run is None:
+        raise HTTPException(404, "Không tìm thấy lần test app")
+    return run
+
+
+@router.post("/app-runs/{run_id}/resume")
+async def resume_app_run(request: Request, run_id: int) -> dict[str, str]:
+    ctx = ctx_of(request)
+    run = _require_run(ctx, run_id)
+    return {"job_id": _start_block2(ctx, run_id, run["serial"], _profile(ctx, run["profile_name"]))}
+
+
+@router.get("/audio-sets/{set_id}/app-runs")
+def list_app_runs(request: Request, set_id: int) -> list[dict[str, Any]]:
+    ctx = ctx_of(request)
+    _require_set(ctx, set_id)
+    return ctx.store.list_app_runs(set_id)
+
+
+@router.get("/app-runs/{run_id}/results")
+def app_run_results(request: Request, run_id: int) -> list[dict[str, Any]]:
+    ctx = ctx_of(request)
+    _require_run(ctx, run_id)
+    return ctx.store.app_results(run_id)
 
 
 @router.get("/health")

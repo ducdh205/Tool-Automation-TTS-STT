@@ -5,9 +5,10 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -38,6 +39,19 @@ class AppContext:
     wyoming_error: str | None = None
     background: set = field(default_factory=set)
     adb: Adb = field(default_factory=Adb)
+    device_factory: Callable[[str], Awaitable[Any]] | None = None  # serial -> DeviceDriver
+    player: Any = None  # AudioPlayer
+
+    @property
+    def profiles_dir(self) -> Path:
+        return self.settings.data_dir / "profiles"
+
+    async def device(self, serial: str) -> Any:
+        if self.device_factory is not None:
+            return await self.device_factory(serial)
+        from tts_stt_tool.pipeline.block2 import AdbDriver
+
+        return await AdbDriver.connect(self.adb, serial)
 
     @property
     def uploads(self) -> Path:
@@ -64,6 +78,8 @@ def create_app(
     tts: TtsEngine | None = None,
     stt: SttEngine | None = None,
     manage_wyoming: bool = True,
+    device_factory: Callable[[str], Awaitable[Any]] | None = None,
+    player: Any = None,
 ) -> FastAPI:
     from tts_stt_tool.api.routes import router
     from tts_stt_tool.api.ws import ws_router
@@ -80,7 +96,13 @@ def create_app(
         tts=tts,
         stt=stt or WyomingStt(settings.wyoming_host, settings.wyoming_port, settings.stt_timeout_s),
         wyoming=_wyoming_manager(settings) if manage_wyoming else None,
+        device_factory=device_factory,
+        player=player,
     )
+    if ctx.player is None:
+        from tts_stt_tool.device.player import WinSoundPlayer
+
+        ctx.player = WinSoundPlayer()
 
     @contextlib.asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
