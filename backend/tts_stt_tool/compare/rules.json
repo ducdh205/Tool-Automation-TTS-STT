@@ -1,0 +1,7 @@
+{
+  "_comment": "Từ tương đương: khóa (chữ thường) được thay bằng giá trị trước khi so sánh. Thêm luật khi gặp dữ liệu thật.",
+  "equivalents": {
+    "sđt": "số điện thoại",
+    "đt": "điện thoại"
+  }
+}

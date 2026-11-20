@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Automation test TTS -> STT for Vietnamese voice assistant apps"
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    "jiwer>=4.0.0",
     "numpy>=2.5.5",
     "openpyxl>=3.1.5",
     "soundfile>=0.14.0",
