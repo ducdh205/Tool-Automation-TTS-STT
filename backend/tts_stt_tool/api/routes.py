@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import time
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -504,8 +505,26 @@ class ExportZipIn(BaseModel):
     item_ids: list[int] | None = None  # for audio="selected"
 
 
+EXPORT_TTL_S = 6 * 3600  # an export nobody downloaded is swept at the next export
+
+
+def _sweep_exports(ctx: AppContext) -> None:
+    now = time.time()
+    for token, (path, _) in list(ctx.exports.items()):
+        if not path.is_file():
+            ctx.exports.pop(token, None)
+    for path in ctx.exports_dir.glob("*.zip") if ctx.exports_dir.is_dir() else ():
+        if now - path.stat().st_mtime > EXPORT_TTL_S:
+            path.unlink(missing_ok=True)
+
+
 @router.post("/app-runs/{run_id}/export-zip")
-async def export_zip(request: Request, run_id: int, body: ExportZipIn) -> FileResponse:
+async def export_zip(request: Request, run_id: int, body: ExportZipIn) -> dict[str, str]:
+    """Build the session zip, then hand out a one-time GET link.
+
+    A plain link lets the browser stream the (up to ~1 GB) file to disk with its own progress bar,
+    instead of holding it in a page blob.
+    """
     ctx = ctx_of(request)
     run = _require_run(ctx, run_id)
     if body.audio == "selected" and not body.item_ids:
@@ -514,12 +533,28 @@ async def export_zip(request: Request, run_id: int, body: ExportZipIn) -> FileRe
         profile = get_profile(ctx.profiles_dir, run["profile_name"]).to_json()
     except KeyError:
         profile = None
-    name = f"{session_root_name(run)}.zip"
-    out = ctx.reports / f"{uuid.uuid4().hex[:8]}_{name}"  # unique: two exports must not share a file
-    await asyncio.to_thread(build_session_zip, ctx.store, run_id, ctx.settings, out, body.audio,
-                            set(body.item_ids or ()), profile)
-    return FileResponse(out, media_type="application/zip", filename=name,
-                        background=BackgroundTask(out.unlink, missing_ok=True))
+    _sweep_exports(ctx)
+    token = uuid.uuid4().hex
+    out = ctx.exports_dir / f"{token}.zip"
+    try:
+        await asyncio.to_thread(build_session_zip, ctx.store, run_id, ctx.settings, out, body.audio,
+                                set(body.item_ids or ()), profile)
+    except BaseException:
+        out.unlink(missing_ok=True)  # never leave a half-written zip behind
+        raise
+    ctx.exports[token] = (out, f"{session_root_name(run)}.zip")
+    return {"download_url": f"/api/exports/{token}"}
+
+
+@router.get("/exports/{token}")
+def download_export(request: Request, token: str) -> FileResponse:
+    ctx = ctx_of(request)
+    entry = ctx.exports.pop(token, None) if re.fullmatch(r"[0-9a-f]{32}", token) else None
+    if entry is None or not entry[0].is_file():
+        raise HTTPException(404, "File xuất không còn — bấm Xuất zip lại")
+    path, name = entry
+    return FileResponse(path, media_type="application/zip", filename=name,
+                        background=BackgroundTask(path.unlink, missing_ok=True))
 
 
 @router.get("/audio-sets/{set_id}/app-runs")

@@ -271,12 +271,16 @@ async def run_block2(
 ) -> None:
     """Run every pending sentence; with ``shots_dir``, failures leave a ``<result id>.png`` there."""
 
-    def save_shot(result_id: int, png: bytes | None) -> str | None:
+    def save_shot(result_id: int, png: bytes | None, log: list[str]) -> str | None:
         if png is None or shots_dir is None:
             return None
-        shots_dir.mkdir(parents=True, exist_ok=True)
-        path = shots_dir / f"{result_id}.png"
-        path.write_bytes(png)
+        try:
+            shots_dir.mkdir(parents=True, exist_ok=True)
+            path = shots_dir / f"{result_id}.png"
+            path.write_bytes(png)
+        except OSError as e:  # disk full, antivirus lock: the result matters more than its photo
+            log.append(f"Không lưu được ảnh: {e}")
+            return None
         return str(path.resolve())
 
     todo = store.pending_for_block2(app_run_id)
@@ -303,8 +307,9 @@ async def run_block2(
             log = list(getattr(e, "log", []) or [])
             # Photograph the screen as the failure left it, before the next sentence recovers it.
             png = await _try_screencap(dev, log) if shots_dir is not None else None
+            shot_path = save_shot(row["id"], png, log)
             store.record_app_result(row["id"], AppStatus.OP_ERROR, None, None, msg, "\n".join(log),
-                                    screenshot_path=save_shot(row["id"], png))
+                                    screenshot_path=shot_path)
             emit(ProgressEvent("", "log", done + 1, total, message=f"{label}: Lỗi thao tác — {msg}"))
             emit(ProgressEvent("", "item", done + 1, total, item=store.get_app_result(row["id"])))
             if op_errors >= MAX_CONSECUTIVE_OP_ERRORS:
@@ -316,8 +321,9 @@ async def run_block2(
         heard = cap.text or ""
         result = compare(row["text_tts"], heard, settings.wer_threshold)
         status = AppStatus.PASSED if result.correct else AppStatus.FAILED
+        shot_path = save_shot(row["id"], cap.screenshot, cap.log)
         store.record_app_result(row["id"], status, heard, result, None, "\n".join(cap.log),
-                                screenshot_path=save_shot(row["id"], cap.screenshot))
+                                screenshot_path=shot_path)
         for line in cap.log:
             emit(ProgressEvent("", "log", done, total, message=line))
         emit(ProgressEvent("", "item", done + 1, total, item=store.get_app_result(row["id"])))

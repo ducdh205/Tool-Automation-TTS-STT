@@ -117,8 +117,15 @@ export const api = {
       { serial, profile, item_ids: itemIds }),
   downloadFormReport: (runId: number) =>
     downloadFile(`/api/app-runs/${runId}/form-report`, undefined, `KetQua_Phien${runId}.xlsx`),
-  downloadSessionZip: (runId: number, audio: "failed" | "all" | "selected", itemIds: number[] | null) =>
-    downloadFile(`/api/app-runs/${runId}/export-zip`, { audio, item_ids: itemIds }, `Phien${runId}.zip`),
+  /** The server builds the zip, then the browser follows a one-time link: it streams the file
+   *  (up to ~1 GB) to disk with its own progress, instead of holding it in a page blob. */
+  async downloadSessionZip(runId: number, audio: "failed" | "all" | "selected", itemIds: number[] | null) {
+    const r = await req<{ download_url: string }>("POST", `/api/app-runs/${runId}/export-zip`,
+      { audio, item_ids: itemIds });
+    const a = document.createElement("a");
+    a.href = r.download_url;
+    a.click();
+  },
   resumeAppRun: (runId: number) => req<{ job_id: string }>("POST", `/api/app-runs/${runId}/resume`),
   nodeAt: (serial: string, x: number, y: number) =>
     req<UiNodeInfo>("GET", `/api/device/${encodeURIComponent(serial)}/node-at?x=${x}&y=${y}`),

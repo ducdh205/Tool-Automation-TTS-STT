@@ -42,6 +42,7 @@ class AppContext:
     device_factory: Callable[[str], Awaitable[Any]] | None = None  # serial -> DeviceDriver
     player: Any = None  # AudioPlayer
     busy_serial: str | None = None  # phone driven by a running block 2 job
+    exports: dict[str, tuple[Path, str]] = field(default_factory=dict)  # one-time token -> (zip, download name)
 
     @property
     def profiles_dir(self) -> Path:
@@ -61,6 +62,11 @@ class AppContext:
     @property
     def reports(self) -> Path:
         return self.settings.data_dir / "reports"
+
+    @property
+    def exports_dir(self) -> Path:
+        """Session zips waiting for their one-time download."""
+        return self.reports / "exports"
 
     def run_dir(self, run_id: int) -> Path:
         """Files produced while an app run executes (screenshots)."""

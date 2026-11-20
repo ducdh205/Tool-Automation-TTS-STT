@@ -171,9 +171,32 @@ def test_export_zip_endpoint(ctx):
     assert r.status_code == 422 and r.json()["detail"] == "Chưa chọn case nào"
     r = c.post(f"/api/app-runs/{run_id}/export-zip", json={})
     assert r.status_code == 200, r.text
-    assert r.headers["content-type"] == "application/zip"
-    names = zipfile.ZipFile(io.BytesIO(r.content)).namelist()
+    url = r.json()["download_url"]
+    assert url.startswith("/api/exports/")
+    got = c.get(url)  # a plain GET: the browser streams it to disk instead of holding a blob
+    assert got.status_code == 200 and got.headers["content-type"] == "application/zip"
+    assert f"Phien{run_id}_" in got.headers["content-disposition"]
+    names = zipfile.ZipFile(io.BytesIO(got.content)).namelist()
     assert any(n.endswith("manhinh.png") for n in names)  # the fake app's answers are wrong -> screenshots
     assert any(n.endswith("thong_tin_phien.txt") for n in names)
-    assert list(app.state.ctx.reports.glob("*.zip")) == []  # deleted after sending
+    assert list(app.state.ctx.reports.rglob("*.zip")) == []  # deleted after sending
+    assert c.get(url).status_code == 404  # one download per export
+    assert c.get("/api/exports/not-a-token").status_code == 404
     assert c.post("/api/app-runs/999/export-zip", json={}).status_code == 404
+
+
+def test_failed_zip_build_leaves_no_file(ctx, monkeypatch):
+    import tts_stt_tool.api.routes as routes
+
+    c, app, _, tmp_path = ctx
+    _, run_id = finished_run(c, tmp_path)
+
+    def broken(store, run_id, settings, out, *a, **kw):
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(b"PK-partial")
+        raise OSError("disk full")
+
+    monkeypatch.setattr(routes, "build_session_zip", broken)
+    with pytest.raises(OSError):
+        c.post(f"/api/app-runs/{run_id}/export-zip", json={})
+    assert list(app.state.ctx.reports.rglob("*.zip")) == []

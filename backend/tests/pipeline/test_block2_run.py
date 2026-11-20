@@ -156,3 +156,21 @@ async def test_op_error_screencap_failure_still_records(env, tmp_path):
     row = store.get_app_result(first["id"])
     assert row["status"] == AppStatus.OP_ERROR.value and row["screenshot_path"] is None
     assert "Không chụp được màn hình" in row["log"]
+
+
+async def test_screenshot_save_failure_keeps_result(env, tmp_path):
+    store, run_id, settings = env
+    first = store.app_results(run_id)[0]
+
+    async def fake(dev, profile, wav, player, prev_bubbles=None, is_correct=None):
+        return AppCapture(text="sai bét", log=[], screenshot=b"\x89PNG-fake")
+
+    blocked = tmp_path / "not-a-dir"
+    blocked.write_text("x")  # mkdir/write under a file fails like a full or locked disk
+    events = []
+    await run_block2(store, run_id, object(), AppProfile(), object(), settings, events.append, asyncio.Event(),
+                     run_one=fake, shots_dir=blocked / "shots")
+    row = store.get_app_result(first["id"])
+    assert row["status"] == AppStatus.FAILED.value and row["screenshot_path"] is None
+    assert "Không lưu được ảnh" in row["log"]
+    assert events[-1].kind == "done"

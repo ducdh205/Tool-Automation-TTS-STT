@@ -71,3 +71,26 @@ def test_form_export_without_form_json(tmp_path):
     ws = wb[SHEET]
     assert ws["A5"].value == "TC1" and ws["M5"].value == "Bật ionizer" and ws["N5"].value == "Ionizer bật"
     assert ws["C5"].value is None and ws["S5"].value == "Pass"
+
+
+def test_text_cells_keep_leading_zeros_and_odd_digits(tmp_path):
+    from backend.tests.report.conftest import input_item
+    from tts_stt_tool.compare.score import compare
+    from tts_stt_tool.store.db import AppStatus, ItemStatus, Store
+
+    store = Store(tmp_path / "t.db")
+    item = input_item("TC9", "2", "0912345678", 5)
+    item.form[3] = "²"
+    set_id = store.create_audio_set("b", "f.xlsx", [SHEET], "v", [item])
+    row = store.get_items(set_id)[0]
+    wav = tmp_path / "a.wav"
+    wav.write_bytes(b"RIFF")
+    store.record_generated(row["id"], str(wav), 1)
+    store.record_verify(row["id"], row["text_tts"], compare(row["text_tts"], row["text_tts"]), ItemStatus.PASSED)
+    run_id = store.create_app_run(set_id, "S", "M", "p", None)
+    rid = store.app_results(run_id)[0]["id"]
+    store.record_app_result(rid, AppStatus.PASSED, "0912345678", compare("0912345678", "0912345678"), None, "")
+    ws = openpyxl.load_workbook(build_form_report(store, run_id, tmp_path / "f.xlsx"))[SHEET]
+    assert ws["M5"].value == "0912345678" and ws["P5"].value == "0912345678"
+    assert ws["D5"].value == "²"
+    assert ws["I5"].value == 2  # the turn column stays numeric like the source form

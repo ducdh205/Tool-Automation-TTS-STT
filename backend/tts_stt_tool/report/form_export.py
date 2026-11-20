@@ -85,8 +85,14 @@ def form_values(result: dict[str, Any], run: dict[str, Any], folder: str, origin
     }
 
 
-def _cell_value(text: str) -> Any:
-    return int(text) if text.isdigit() else (text or None)
+_NUMERIC = {"I", "O", "Q"}  # Bước / Lượt, Độ trễ tối đa, Độ trễ thực tế: numbers in the source form
+
+
+def _cell_value(col: str, text: str) -> Any:
+    """Text stays text (an utterance "0912345678" keeps its 0); only the form's number columns become numbers."""
+    if col in _NUMERIC and text.isascii() and text.isdigit():
+        return int(text)
+    return text or None
 
 
 def _sheet_header(ws: Any, title: str) -> None:
@@ -147,7 +153,7 @@ def build_form_report(store: Store, run_id: int, out_path: Path) -> Path:
             for col, v in values.items():
                 base[column_index_from_string(col) - 1] = v
             for i, text in enumerate(base, start=1):
-                c = ws.cell(row=n, column=i, value=_cell_value(text))
+                c = ws.cell(row=n, column=i, value=_cell_value(get_column_letter(i), text))
                 c.alignment = Alignment(vertical="top", wrap_text=get_column_letter(i) in _WRAP)
         ws.freeze_panes = "A5"
         ws.auto_filter.ref = f"A4:{get_column_letter(len(FORM_HEADERS))}{4 + len(rows)}"
