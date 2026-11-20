@@ -5,6 +5,7 @@ description = "Automation test TTS -> STT for Vietnamese voice assistant apps"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "numpy>=2.5.5",
+    "openpyxl>=3.1.5",
     "soundfile>=0.14.0",
     "soxr>=1.1.0",
     "vieneu>=3.8.5",

@@ -53,7 +53,7 @@ Kết quả cuối cùng: báo cáo Excel với tỉ lệ đúng của app.
 - Ô "Công việc hôm nay" chứa **toàn bộ câu app nghe được** → so sánh trực tiếp với cả câu gốc.
 - Nút voice: **bấm để bắt đầu, bấm lần nữa để dừng**; sau mỗi lần dừng app mở form mới.
 - **File input mẫu:** `public/DieuKhienXe_Pre.xlsx` (bộ testcase điều khiển xe VF6, form 36 cột).
-  - Mỗi sheet một tính năng (ví dụ "ONOFFTemperature Synchronizatio"); 12 sheet có dữ liệu,
+  - Mỗi sheet một tính năng (ví dụ "ONOFFTemperature Synchronizatio"); 14 sheet có dữ liệu,
     tổng ~3.986 dòng. Các sheet "Tổng hợp", "Hướng dẫn", "00_Smoke", "01_All" và sheet trống bị bỏ qua.
   - Dòng 1–3 là tiêu đề/nhóm cột, **header ở dòng 4**, dữ liệu từ dòng 5.
   - Cột dùng: **A TC_ID**, **B Cụm tính năng**, **E Mức ưu tiên**, **H Vùng miền**, **I Bước/Lượt**,
