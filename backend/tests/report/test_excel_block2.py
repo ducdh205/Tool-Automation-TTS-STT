@@ -23,6 +23,7 @@ def run(tmp_path):
                        region="", speaker="👤 Người dùng", text_raw=t, expected="", source_row=5) for i, t in enumerate(texts)]
     set_id = store.create_audio_set("bộ", "f.xlsx", ["A", "B"], "v", items)
     for r in store.get_items(set_id):
+        store.record_generated(r["id"], f"{r['id']}.wav", 1)
         store.record_verify(r["id"], r["text_tts"], compare(r["text_tts"], r["text_tts"]), ItemStatus.PASSED)
     run_id = store.create_app_run(set_id, "SER1", "22120RN86G", "Vita Work (dev)", "1.0.7")
     res = store.app_results(run_id)

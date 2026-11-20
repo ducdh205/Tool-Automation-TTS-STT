@@ -35,7 +35,7 @@ export type DeviceInputBody =
   | { action: "swipe"; x: number; y: number; x2: number; y2: number; duration_ms?: number }
   | { action: "key"; key: DeviceKey }
   | { action: "text"; text: string };
-export interface DeviceStatus { adb: boolean; error: string | null; devices: DeviceInfo[] }
+export interface DeviceStatus { adb: boolean; error: string | null; devices: DeviceInfo[]; busy?: string | null }
 
 export interface ProgressEvent {
   job_id: string; kind: "item" | "progress" | "log" | "done" | "error" | "cancelled";
@@ -44,7 +44,7 @@ export interface ProgressEvent {
 
 export interface AppProfile {
   name: string; package: string; open_label: string; stop_label: string; idle_label: string;
-  close_label: string; sheet_label: string; pre_delay_s: number; post_delay_s: number;
+  close_label: string; sheet_label: string; discard_label?: string; pre_delay_s: number; post_delay_s: number;
   listen_timeout_s: number; result_timeout_s: number;
 }
 export type AppStatus = "Chờ" | "Đúng" | "Sai" | "Lỗi thao tác";

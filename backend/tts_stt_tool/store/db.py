@@ -67,13 +67,16 @@ CREATE TABLE IF NOT EXISTS app_results (
     item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
     status TEXT NOT NULL,
     app_text TEXT, wer REAL, cer REAL, ops_json TEXT, error TEXT, log TEXT,
-    updated_at TEXT
+    updated_at TEXT,
+    text_tts_snap TEXT, audio_snap TEXT
 );
 CREATE INDEX IF NOT EXISTS ix_app_results_run ON app_results(app_run_id, id);
 """
 
 _RESULT_SELECT = (
-    "SELECT r.*, i.sheet, i.tc_id, i.turn, i.feature, i.priority, i.text_raw, i.text_tts, i.audio_path"
+    # text/audio as they were when the run was created: later edits must not change what was tested
+    "SELECT r.*, i.sheet, i.tc_id, i.turn, i.feature, i.priority, i.text_raw,"
+    " COALESCE(r.text_tts_snap, i.text_tts) AS text_tts, COALESCE(r.audio_snap, i.audio_path) AS audio_path"
     " FROM app_results r JOIN items i ON i.id = r.item_id"
 )
 
@@ -101,6 +104,10 @@ class Store:
         with self._conn() as c:
             c.execute("PRAGMA journal_mode=WAL")
             c.executescript(SCHEMA)
+            cols = {r["name"] for r in c.execute("PRAGMA table_info(app_results)")}
+            for col in ("text_tts_snap", "audio_snap"):  # databases created before these columns
+                if col not in cols:
+                    c.execute(f"ALTER TABLE app_results ADD COLUMN {col} TEXT")
 
     @contextmanager
     def _conn(self) -> Iterator[sqlite3.Connection]:
@@ -246,8 +253,9 @@ class Store:
             )
             run_id = int(cur.lastrowid)
             c.execute(
-                "INSERT INTO app_results(app_run_id, item_id, status, updated_at)"
-                " SELECT ?, id, ?, ? FROM items WHERE audio_set_id=? AND status=? AND enabled=1 ORDER BY id",
+                "INSERT INTO app_results(app_run_id, item_id, status, updated_at, text_tts_snap, audio_snap)"
+                " SELECT ?, id, ?, ?, text_tts, audio_path FROM items"
+                " WHERE audio_set_id=? AND status=? AND enabled=1 AND audio_path IS NOT NULL ORDER BY id",
                 (run_id, AppStatus.PENDING.value, _now(), audio_set_id, ItemStatus.PASSED.value),
             )
             return run_id

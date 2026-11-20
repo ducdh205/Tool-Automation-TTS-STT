@@ -18,7 +18,7 @@ async def test_happy_path():
     cap = await one(app)
     assert cap.text == "chỉnh nhiệt độ ghế lái lên 24 độ"
     assert cap.error is None
-    assert app.taps == ["Nói để tạo việc", "Dừng nghe", "Đóng"]
+    assert app.taps == ["Nói để tạo việc", "Dừng nghe", "BACK"]  # close with Back, not a stale tap
     assert app.played == [WAV]
     assert app.state == "home"
     assert cap.log
@@ -46,7 +46,7 @@ async def test_starts_from_open_sheet():
     app = FakeApp(state="idle")
     cap = await one(app)
     assert cap.text is not None
-    assert app.taps[0] == "Đóng"
+    assert app.taps[0] == "BACK"
 
 
 async def test_starts_from_background_relaunches_app():
@@ -70,8 +70,9 @@ async def test_sheet_never_opens():
 
 async def test_plays_before_app_gives_up_listening():
     """Real phone: one dump ~2.5 s and the app stops after ~3 s of silence.
-    Playback must start without waiting for a confirming dump."""
-    app = FakeApp(silence_dumps=0)
+    Playback must not wait for a dump: only the baseline dump, which runs concurrently with
+    playback, may happen before the audio starts."""
+    app = FakeApp(silence_dumps=1)
     cap = await one(app)
     assert app.played == [WAV]
     assert cap.text == "chỉnh nhiệt độ ghế lái lên 24 độ"
@@ -100,7 +101,7 @@ async def test_history_kept_between_items():
     app = FakeApp(keep_history=True)
     first = await one(app)
     app.transcript = "bật đèn trần"
-    second = await run_one(app, AppProfile(), WAV, app, sleep=no_sleep, prev_bubbles=first.bubbles)
+    second = await one(app)
     assert second.text == "bật đèn trần"
 
 
@@ -108,7 +109,7 @@ async def test_history_kept_and_app_auto_stopped():
     app = FakeApp(keep_history=True, auto_stop=True)
     first = await one(app)
     app.transcript = "bật đèn trần"
-    second = await run_one(app, AppProfile(), WAV, app, sleep=no_sleep, prev_bubbles=first.bubbles)
+    second = await one(app)
     assert second.text == "bật đèn trần"
     assert second.bubbles == ["chỉnh nhiệt độ ghế lái lên 24 độ", "bật đèn trần"]
 
@@ -127,3 +128,46 @@ async def test_mic_never_starts():
     with pytest.raises(OperationError, match="[Mm]ic"):
         await one(app)
     assert app.played == []
+
+
+# --- review 2 fixes -----------------------------------------------------------
+async def test_app_stops_during_the_stop_check_dump():
+    """Review2 #1: the dump shows 'Dừng nghe' but the app stops before the tap lands."""
+    app = FakeApp(stop_during_dump=True)
+    cap = await one(app)
+    assert "Bấm để nói" not in app.taps
+    assert "Dừng nghe" not in app.taps
+    assert cap.text == "chỉnh nhiệt độ ghế lái lên 24 độ"
+
+
+async def test_stale_history_with_auto_stop_is_not_reported():
+    """Review2 #2a: chat kept, app auto-stops, app heard nothing -> no text (not the old bubble)."""
+    app = FakeApp(keep_history=True, auto_stop=True)
+    await one(app)
+    app.transcript = None
+    cap = await one(app)
+    assert cap.text is None
+
+
+async def test_sheet_gone_while_reading_is_op_error():
+    """Review2 #2c: app navigated away -> do not read the home screen as bubbles."""
+    app = FakeApp(transcript=None, leave_after_stop=True)
+    with pytest.raises(OperationError, match="Tạo việc"):
+        await one(app)
+
+
+async def test_op_error_carries_log():
+    """Review2 #5."""
+    app = FakeApp(mic_delay_checks=10**6)
+    with pytest.raises(OperationError) as ei:
+        await one(app)
+    assert any("Nói để tạo việc" in line for line in ei.value.log)
+
+
+async def test_recovers_from_task_form_via_discard_dialog():
+    """Real phone: a stray tap opened a task form; Back shows 'Ở lại' / 'Bỏ'."""
+    app = FakeApp(state="form")
+    cap = await one(app)
+    assert "Bỏ" in app.taps
+    assert app.launched == 0
+    assert cap.text == "chỉnh nhiệt độ ghế lái lên 24 độ"

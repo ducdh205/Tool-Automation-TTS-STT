@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+import uuid
+import xml.etree.ElementTree as ET
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -14,7 +16,6 @@ from tts_stt_tool.stt.server_manager import REPO_ROOT
 
 VENDOR_ADB = REPO_ROOT / "vendor" / "platform-tools" / ("adb.exe" if os.name == "nt" else "adb")
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-UI_DUMP_PATH = "/sdcard/tts_stt_ui.xml"
 
 
 class AdbError(RuntimeError):
@@ -58,6 +59,7 @@ class Adb:
         self.path = path or find_adb()
         self.timeout_s = timeout_s
         self._screen_lock = asyncio.Lock()
+        self._dump_locks: dict[str, asyncio.Lock] = {}
 
     @property
     def available(self) -> bool:
@@ -90,19 +92,38 @@ class Adb:
             raise AdbError("screencap không trả về ảnh PNG")
         return png
 
+    def _serial_lock(self, serial: str) -> asyncio.Lock:
+        return self._dump_locks.setdefault(serial, asyncio.Lock())
+
     async def dump_ui(self, serial: str, attempts: int = 3) -> str:
-        """``uiautomator dump`` XML; retries because it fails while the screen animates."""
+        """``uiautomator dump`` XML.
+
+        A failed dump ("could not get idle state" while the screen animates) still exits 0 and
+        leaves the previous file behind, so: own file per call, delete it first, require the
+        "dumped to" confirmation and a parsable document; retry otherwise. One dump per phone
+        at a time (only one UiAutomation client can run).
+        """
+        path = f"/sdcard/tts_stt_ui_{uuid.uuid4().hex[:8]}.xml"
         last = ""
-        for _ in range(attempts):
+        async with self._serial_lock(serial):
             try:
-                await self.run("-s", serial, "shell", "uiautomator", "dump", UI_DUMP_PATH)
-                xml = (await self.run("-s", serial, "exec-out", "cat", UI_DUMP_PATH)).decode("utf-8", "replace")
-            except AdbError as e:
-                last = str(e)
-                continue
-            if "<hierarchy" in xml:
-                return xml
-            last = xml.strip()[:200]
+                for _ in range(attempts):
+                    try:
+                        await self.run("-s", serial, "shell", "rm", "-f", path)
+                        out = (await self.run("-s", serial, "shell", "uiautomator", "dump", path)).decode("utf-8", "replace")
+                        if "dumped to" not in out:
+                            last = out.strip()[:200]
+                            continue
+                        xml = (await self.run("-s", serial, "exec-out", "cat", path)).decode("utf-8", "replace")
+                        ET.fromstring(xml[xml.index("<"):])
+                        return xml
+                    except (AdbError, ValueError, ET.ParseError) as e:
+                        last = str(e)[:200]
+            finally:
+                try:
+                    await self.run("-s", serial, "shell", "rm", "-f", path)
+                except AdbError:
+                    pass
         raise AdbError(f"uiautomator dump lỗi sau {attempts} lần: {last}")
 
     async def mic_active(self, serial: str) -> bool:

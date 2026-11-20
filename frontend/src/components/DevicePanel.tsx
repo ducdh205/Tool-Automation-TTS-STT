@@ -154,8 +154,9 @@ export function DevicePanel({ jobLogs = [], profile = null, onProfileSaved }: Pr
   const current: DeviceInfo | undefined = devices.find((d) => d.serial === picked) ?? devices[0];
 
   const online = current?.state === "device";
+  const locked = !!current && status?.busy === current.serial; // a block 2 job drives this phone
   const send = async (b: DeviceInputBody) => {
-    if (!current) return;
+    if (!current || locked) return;
     if (pinning && b.action === "tap") {
       // Pin mode: look up the control under the finger instead of tapping the phone.
       setPinError(null);
@@ -223,9 +224,12 @@ export function DevicePanel({ jobLogs = [], profile = null, onProfileSaved }: Pr
       <div className="phone">
         <div className="phone-screen">{screen}</div>
       </div>
+      {online && locked && (
+        <div className="small warn-box">Đang chạy test app — tạm khóa chạm, phím và ghim nút.</div>
+      )}
       {online && (
         <div className="pin-bar">
-          <button className={`btn small-btn ${pinning ? "primary" : ""}`} disabled={!profile}
+          <button className={`btn small-btn ${pinning ? "primary" : ""}`} disabled={!profile || locked}
             onClick={() => { setPinning(!pinning); setPinned(null); setPinError(null); }}
             title="Bật rồi chạm lên màn hình để xem nhãn nút và gán cho hồ sơ app">
             {pinning ? "Đang ghim — chạm lên nút trên màn hình" : "Ghim nút cho hồ sơ app"}

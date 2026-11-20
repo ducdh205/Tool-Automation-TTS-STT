@@ -45,7 +45,7 @@ function SttText({ item }: { item: Item }) {
   );
 }
 
-function EditableText({ item, onSave }: { item: Item; onSave: (t: string) => void }) {
+function EditableText({ item, onSave, readOnly }: { item: Item; onSave: (t: string) => void; readOnly?: boolean }) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(item.text_tts ?? "");
   if (editing) {
@@ -67,7 +67,7 @@ function EditableText({ item, onSave }: { item: Item; onSave: (t: string) => voi
     <span
       className={item.text_tts ? "" : "muted"}
       title="Nhấp đúp để sửa câu đọc"
-      onDoubleClick={() => { setValue(item.text_tts ?? item.text_raw); setEditing(true); }}
+      onDoubleClick={() => { if (readOnly) return; setValue(item.text_tts ?? item.text_raw); setEditing(true); }}
     >
       {item.text_tts ?? "—"}
     </span>
@@ -125,7 +125,7 @@ export function ItemTable({ items, onPatch, app }: Props) {
                 <span className="ellipsis" title={it.tc_id}>{it.tc_id}</span>
                 <span>{it.turn}</span>
                 <span className="ellipsis" title={it.text_raw}>{it.text_raw}</span>
-                <span className="ellipsis cell-tts"><EditableText item={it} onSave={(t) => onPatch(it.id, { text_tts: t })} /></span>
+                <span className="ellipsis cell-tts"><EditableText item={it} readOnly={!!app} onSave={(t) => onPatch(it.id, { text_tts: t })} /></span>
                 <span><PlayButton item={it} /></span>
                 <span className="ellipsis">{app ? <AppText r={ar} /> : <SttText item={it} />}</span>
                 <span className="num">{formatPct(app ? ar?.wer : it.wer)}</span>

@@ -55,3 +55,15 @@ def test_runs_are_independent_and_listed(env):
     assert [r["id"] for r in runs] == [r2, r1]
     assert runs[1]["summary"] == {AppStatus.FAILED.value: 1, AppStatus.PENDING.value: 1}
     assert store.get_app_run(r1)["serial"] == "A"
+
+
+def test_results_keep_text_and_audio_snapshot(env):
+    """Review2 #6: editing a sentence after the run was created must not change what was tested."""
+    store, set_id = env
+    run_id = store.create_app_run(set_id, "S", "m", "p", None)
+    row = store.app_results(run_id)[0]
+    store.set_item_text(row["item_id"], "câu đã sửa")
+    again = store.app_results(run_id)[0]
+    assert again["text_tts"] == "bật đèn"
+    assert again["audio_path"] == row["audio_path"] and again["audio_path"]
+    assert [r["id"] for r in store.pending_for_block2(run_id)][0] == row["id"]

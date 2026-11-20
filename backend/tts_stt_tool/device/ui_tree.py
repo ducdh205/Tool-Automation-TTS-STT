@@ -52,12 +52,15 @@ def parse_dump(xml: str) -> list[UiNode]:
 
 
 def find(nodes: list[UiNode], label: str) -> UiNode | None:
-    """Exact label match first, then prefix (multi-line content-desc)."""
+    """Exact label match first, then the first line of a multi-line content-desc.
+
+    A plain prefix is not enough: "Đóng" must not match a task card "Đóng cửa sổ…".
+    """
     for n in nodes:
         if n.label == label:
             return n
     for n in nodes:
-        if n.label.startswith(label):
+        if n.label.split("\n", 1)[0] == label:
             return n
     return None
 
@@ -98,11 +101,16 @@ def new_bubble_after(prev: list[str], after: list[UiNode], screen_w: int) -> UiN
     """New user bubble compared with the labels seen before.
 
     The app sometimes keeps the chat when its sheet is reopened and sometimes clears it:
-    a longer list that extends ``prev`` -> its last bubble is new; an identical list -> nothing
-    new; any other list (history was cleared) -> its last bubble is new.
+    a list that is a contiguous slice of ``prev`` -> nothing new (same chat, maybe scrolled);
+    any other list (extended, or history was cleared) -> its last bubble is new.
     """
     bubbles = right_bubbles(after, screen_w)
     labels = [b.label for b in bubbles]
-    if not bubbles or labels == prev:
-        return None
+    if not bubbles or _is_slice(labels, prev):
+        return None  # same chat, possibly scrolled (e.g. a failure message pushed the top bubble out)
     return bubbles[-1]
+
+
+def _is_slice(part: list[str], whole: list[str]) -> bool:
+    n = len(part)
+    return any(whole[i : i + n] == part for i in range(len(whole) - n + 1))

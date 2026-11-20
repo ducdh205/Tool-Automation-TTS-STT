@@ -95,3 +95,22 @@ def test_node_at(ctx, monkeypatch):
     r = c.get("/api/device/SER/node-at", params={"x": 360, "y": 1471})
     assert r.status_code == 200
     assert r.json()["label"] == "Nói để tạo việc"
+
+
+def test_manual_input_and_pin_blocked_while_job_uses_the_phone(ctx):
+    """Review2 #4: user taps / pin-mode dumps must not interfere with a running block 2 job."""
+    import time
+
+    c, app, fake, tmp_path = ctx
+    fake.transcript = None  # nothing heard -> the job polls until result_timeout_s
+    name = fast_profile(c)
+    p = next(x for x in c.get("/api/profiles").json() if x["name"] == name) | {"result_timeout_s": 3}
+    c.put(f"/api/profiles/{name}", json=p)
+    set_id = verified_set(c, tmp_path)
+    c.post(f"/api/audio-sets/{set_id}/app-runs", json={"serial": "SER", "profile": name})
+    time.sleep(0.3)
+    assert c.post("/api/device/SER/input", json={"action": "tap", "x": 1, "y": 1}).status_code == 409
+    assert c.get("/api/device/SER/node-at", params={"x": 1, "y": 1}).status_code == 409
+    assert c.get("/api/device").json()["busy"] == "SER"
+    wait_job_end(c, timeout=30)
+    assert c.get("/api/device").json()["busy"] is None

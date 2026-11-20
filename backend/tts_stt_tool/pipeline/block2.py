@@ -96,17 +96,21 @@ async def _tap(dev: DeviceDriver, node: UiNode, log: list[str]) -> None:
 
 
 async def ensure_home(dev: DeviceDriver, p: AppProfile, log: list[str], sleep: Sleep) -> list[UiNode]:
-    for _ in range(3):
+    """Get back to the screen with the mic button using Back (never stale coordinate taps).
+
+    A stray tap can open a task form; Back on it asks "Ở lại / Bỏ" -> take the discard button.
+    """
+    for _ in range(4):
         nodes = await dev.nodes()
         if find(nodes, p.open_label):
             return nodes
-        close = find(nodes, p.close_label)
-        if close:
-            await _tap(dev, close, log)
+        discard = find(nodes, p.discard_label) if p.discard_label else None
+        if discard:
+            await _tap(dev, discard, log)
         else:
             log.append("Back")
             await dev.back()
-        await sleep(0.6)
+        await sleep(1.0)
     log.append(f"Mở lại app {p.package}")
     await dev.launch(p.package)
     await sleep(2.0)
@@ -148,16 +152,28 @@ async def _wait_mic(dev: DeviceDriver, p: AppProfile, log: list[str], sleep: Sle
     raise OperationError(f"Mic không bật sau {p.listen_timeout_s:g}s (không thấy app thu âm)")
 
 
+def _sheet_open(nodes: list[UiNode], p: AppProfile) -> bool:
+    return any(find(nodes, label) for label in (p.close_label, p.stop_label, p.idle_label))
+
+
 async def run_one(
     dev: DeviceDriver,
     p: AppProfile,
     wav: Path,
     player: AudioPlayer,
     sleep: Sleep = asyncio.sleep,
-    prev_bubbles: list[str] | None = None,
+    prev_bubbles: list[str] | None = None,  # kept for callers; the baseline is now measured
 ) -> AppCapture:
-    """``prev_bubbles``: user bubbles seen when the previous sentence finished (chat may persist)."""
     log: list[str] = []
+    try:
+        return await _run_one(dev, p, wav, player, sleep, log)
+    except OperationError as e:
+        e.log = log  # type: ignore[attr-defined]
+        raise
+
+
+async def _run_one(dev: DeviceDriver, p: AppProfile, wav: Path, player: AudioPlayer, sleep: Sleep,
+                   log: list[str]) -> AppCapture:
     home = await ensure_home(dev, p, log, sleep)
     await _tap(dev, find(home, p.open_label), log)  # type: ignore[arg-type]
 
@@ -165,23 +181,36 @@ async def run_one(
     # after ~3 s of silence; a UI dump costs ~2.5 s, so watch the mic via dumpsys (~0.1 s).
     await _wait_mic(dev, p, log, sleep)
     await sleep(p.pre_delay_s)
+
+    # Baseline dump while our audio plays: the app is listening, so no new bubble exists yet.
+    # (The chat may still hold earlier bubbles: the sheet does not always clear on reopen.)
+    base_task = asyncio.create_task(dev.nodes())
+    await asyncio.sleep(0)
     log.append(f"Phát {Path(wav).name}")
     await asyncio.to_thread(player.play, wav)
+    base = await base_task
+    if not _sheet_open(base, p):
+        raise OperationError(f"Bảng '{p.sheet_label or p.close_label}' không mở")
+    before = bubble_labels(base, dev.screen_w)
     await sleep(p.post_delay_s)
 
-    nodes = await dev.nodes()
-    stop = find(nodes, p.stop_label)
-    if stop:
-        before = bubble_labels(nodes, dev.screen_w)  # still listening: nothing new yet
-        await _tap(dev, stop, log)
-    elif find(nodes, p.idle_label):
-        log.append("App đã tự dừng nghe")  # never tap the idle mic: it would start a new listen
-        before = list(prev_bubbles or [])
+    # Decide on the stop tap with the cheap mic check right before tapping: a fresh UI dump
+    # takes ~2.5 s, during which the app may stop by itself — and tapping the idle mic would
+    # start a new listen.
+    live = await dev.mic_active()
+    stop = find(base, p.stop_label)
+    if live is None:
+        stop = find(await dev.nodes(), p.stop_label)
+    if live is False or stop is None:
+        log.append("App đã tự dừng nghe")
     else:
-        raise OperationError(f"App không chuyển sang nghe (không thấy '{p.stop_label}')")
+        await _tap(dev, stop, log)
 
     text: str | None = None
+    nodes = base
     async for nodes in _poll(dev, p.result_timeout_s, sleep):
+        if not _sheet_open(nodes, p):
+            raise OperationError(f"Bảng '{p.sheet_label or p.close_label}' không còn trên màn hình khi đọc kết quả")
         bubble = new_bubble_after(before, nodes, dev.screen_w)
         if bubble:
             text = bubble.label
@@ -191,9 +220,10 @@ async def run_one(
         log.append("App không trả câu nào")
 
     bubbles = bubble_labels(nodes, dev.screen_w)
-    close = find(nodes, p.close_label)
-    if close:
-        await _tap(dev, close, log)
+    # Close with Back: the sheet grows when the assistant answers, so a tap at coordinates from a
+    # ~2.5 s old dump can land on the "Thử nói" suggestion and open a task form.
+    log.append("Back (đóng bảng)")
+    await dev.back()
     return AppCapture(text=text, log=log, bubbles=bubbles)
 
 
@@ -213,7 +243,6 @@ async def run_block2(
 ) -> None:
     todo = store.pending_for_block2(app_run_id)
     total = len(todo)
-    prev: list[str] | None = None
     op_errors = 0
     for done, row in enumerate(todo):
         if cancel.is_set():
@@ -222,21 +251,22 @@ async def run_block2(
         label = f"[{done + 1}/{total}] {row['tc_id']}"
         emit(ProgressEvent("", "log", done, total, message=f"{label}: {row['text_tts']}"))
         try:
-            cap = await run_one(dev, profile, Path(row["audio_path"]), player, prev_bubbles=prev)
+            if not row["audio_path"] or not Path(row["audio_path"]).is_file():
+                raise OperationError("Không có file audio của câu này (chạy lại Khối 1)")
+            cap = await run_one(dev, profile, Path(row["audio_path"]), player)
         except Exception as e:  # OperationError, adb failures: the tool, not the app, failed
             op_errors += 1
             msg = str(e) or type(e).__name__
-            store.record_app_result(row["id"], AppStatus.OP_ERROR, None, None, msg, "")
+            store.record_app_result(row["id"], AppStatus.OP_ERROR, None, None, msg,
+                                    "\n".join(getattr(e, "log", []) or []))
             emit(ProgressEvent("", "log", done + 1, total, message=f"{label}: Lỗi thao tác — {msg}"))
             emit(ProgressEvent("", "item", done + 1, total, item=store.get_app_result(row["id"])))
-            prev = None
             if op_errors >= MAX_CONSECUTIVE_OP_ERRORS:
                 emit(ProgressEvent("", "error", done + 1, total,
                                    message=f"Dừng sau {MAX_CONSECUTIVE_OP_ERRORS} lỗi thao tác liên tiếp: {msg}"))
                 return
             continue
         op_errors = 0
-        prev = cap.bubbles
         heard = cap.text or ""
         result = compare(row["text_tts"], heard, settings.wer_threshold)
         status = AppStatus.PASSED if result.correct else AppStatus.FAILED

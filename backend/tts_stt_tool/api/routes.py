@@ -36,6 +36,12 @@ def ctx_of(request: Request) -> AppContext:
     return request.app.state.ctx
 
 
+def _require_free(ctx: AppContext, serial: str) -> None:
+    """Manual taps / pin dumps would break the sentence a block 2 job is running on this phone."""
+    if ctx.busy_serial == serial:
+        raise HTTPException(409, "Điện thoại đang chạy test app — tạm khóa thao tác tay")
+
+
 def _safe_name(name: str) -> str:
     return re.sub(r"[^\w.\- ]+", "_", name).strip() or "file"
 
@@ -269,14 +275,15 @@ def _gpu_available() -> bool:
 # -- device -------------------------------------------------------------------
 @router.get("/device")
 async def device_status(request: Request) -> dict[str, Any]:
-    adb = ctx_of(request).adb
+    ctx = ctx_of(request)
+    adb = ctx.adb
     if not adb.available:
-        return {"adb": False, "error": "Không tìm thấy adb", "devices": []}
+        return {"adb": False, "error": "Không tìm thấy adb", "devices": [], "busy": ctx.busy_serial}
     try:
         devices = await adb.devices()
     except AdbError as e:
-        return {"adb": True, "error": str(e), "devices": []}
-    return {"adb": True, "error": None, "devices": [d.to_json() for d in devices]}
+        return {"adb": True, "error": str(e), "devices": [], "busy": ctx.busy_serial}
+    return {"adb": True, "error": None, "devices": [d.to_json() for d in devices], "busy": ctx.busy_serial}
 
 
 @router.get("/device/{serial}/screen")
@@ -302,6 +309,7 @@ class DeviceInput(BaseModel):
 
 @router.post("/device/{serial}/input")
 async def device_input(request: Request, serial: str, body: DeviceInput) -> dict[str, bool]:
+    _require_free(ctx_of(request), serial)
     adb = ctx_of(request).adb
     try:
         if body.action == "tap":
@@ -327,6 +335,7 @@ async def device_input(request: Request, serial: str, body: DeviceInput) -> dict
 
 @router.get("/device/{serial}/node-at")
 async def device_node_at(request: Request, serial: str, x: int, y: int) -> dict[str, Any]:
+    _require_free(ctx_of(request), serial)
     try:
         nodes = parse_dump(await ctx_of(request).adb.dump_ui(serial))
     except AdbError as e:
@@ -348,6 +357,7 @@ class ProfileIn(BaseModel):
     idle_label: str = Field(min_length=1)
     close_label: str = Field(min_length=1)
     sheet_label: str = ""
+    discard_label: str = ""
     pre_delay_s: float = Field(ge=0, le=10)
     post_delay_s: float = Field(ge=0, le=10)
     listen_timeout_s: float = Field(gt=0, le=60)
@@ -373,8 +383,12 @@ class AppRunIn(BaseModel):
 
 def _start_block2(ctx: AppContext, run_id: int, serial: str, profile: AppProfile) -> str:
     async def job(emit, cancel) -> None:
-        dev = await ctx.device(serial)
-        await run_block2(ctx.store, run_id, dev, profile, ctx.player, ctx.settings, emit, cancel)
+        ctx.busy_serial = serial
+        try:
+            dev = await ctx.device(serial)
+            await run_block2(ctx.store, run_id, dev, profile, ctx.player, ctx.settings, emit, cancel)
+        finally:
+            ctx.busy_serial = None
 
     try:
         return ctx.runner.start(f"Khối 2 – lần test {run_id}", job)

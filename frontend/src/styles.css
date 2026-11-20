@@ -171,3 +171,4 @@ nav { display: flex; flex-direction: column; gap: 2px; }
 .pin-bar { display: flex; flex-direction: column; gap: 6px; }
 .pin-result { border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; display: flex; flex-direction: column; gap: 4px; }
 .log-lines { overflow: auto; flex: 1; min-height: 0; font-family: Consolas, monospace; font-size: 11px; line-height: 1.5; }
+.warn-box { background: var(--warn-soft); color: var(--warn); border-radius: 6px; padding: 6px 8px; }

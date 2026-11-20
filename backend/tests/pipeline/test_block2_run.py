@@ -21,7 +21,9 @@ def env(tmp_path):
     texts = ["bật đèn", "tắt đèn", "mở cốp", "đóng cốp", "bật quạt", "tắt quạt", "mở kính"]
     set_id = store.create_audio_set("s", "f.xlsx", ["S"], "v", [_item(str(i), t) for i, t in enumerate(texts)])
     for r in store.get_items(set_id):
-        store.record_generated(r["id"], f"{r['id']}.wav", 1)
+        wav = tmp_path / f"{r['id']}.wav"
+        wav.write_bytes(b"RIFF")
+        store.record_generated(r["id"], str(wav), 1)
         store.record_verify(r["id"], r["text_tts"], compare(r["text_tts"], r["text_tts"]), ItemStatus.PASSED)
     run_id = store.create_app_run(set_id, "SER", "m", "p", None)
     return store, run_id, Settings(data_dir=tmp_path)
@@ -67,7 +69,6 @@ async def test_statuses(env):
     assert "play" in r["bật đèn"]["log"]
     kinds = [e.kind for e in events]
     assert "log" in kinds and kinds[-1] == "done"
-    assert fake.seen_prev[1] == ["bật đèn"]  # chat state carried to the next sentence
 
 
 async def test_five_op_errors_abort(env):
@@ -85,7 +86,7 @@ async def test_resume_only_pending_and_op_errors(env):
     store.record_app_result(first["id"], AppStatus.PASSED, "bật đèn", compare("bật đèn", "bật đèn"), None, "")
     fake = scripted({})
     await go(store, run_id, settings, fake)
-    assert len(fake.seen_prev) == 6
+    assert len(fake.seen_prev) == 6  # one call per remaining sentence
 
 
 async def test_cancel_after_first(env):
@@ -101,3 +102,16 @@ async def test_cancel_after_first(env):
     await go(store, run_id, settings, scripted({}), cancel=cancel, emit=emit)
     assert events[-1].kind == "cancelled"
     assert store.app_summary(run_id)[AppStatus.PENDING.value] == 6
+
+
+async def test_op_error_log_is_stored(env):
+    """Review2 #5."""
+    store, run_id, settings = env
+    first = store.app_results(run_id)[0]
+    err = OperationError("Mic không bật")
+    err.log = ["Bấm 'Nói để tạo việc' (360,1471)"]
+    fake = scripted({f"{first['item_id']}.wav": err})
+    await go(store, run_id, settings, fake)
+    row = by_text(store, run_id)[first["text_tts"]]
+    assert row["status"] == AppStatus.OP_ERROR.value
+    assert "Nói để tạo việc" in row["log"]

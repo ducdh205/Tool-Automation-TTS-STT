@@ -19,4 +19,5 @@ class WinSoundPlayer:
             raise FileNotFoundError(path)
         import winsound
 
-        winsound.PlaySound(str(path), winsound.SND_FILENAME)
+        # NODEFAULT: an unplayable file must fail, not play the system beep and "succeed"
+        winsound.PlaySound(str(path), winsound.SND_FILENAME | winsound.SND_NODEFAULT)

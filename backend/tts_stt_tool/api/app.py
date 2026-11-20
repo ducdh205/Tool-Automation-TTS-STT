@@ -41,6 +41,7 @@ class AppContext:
     adb: Adb = field(default_factory=Adb)
     device_factory: Callable[[str], Awaitable[Any]] | None = None  # serial -> DeviceDriver
     player: Any = None  # AudioPlayer
+    busy_serial: str | None = None  # phone driven by a running block 2 job
 
     @property
     def profiles_dir(self) -> Path:

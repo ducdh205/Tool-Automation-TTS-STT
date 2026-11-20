@@ -66,12 +66,14 @@ class FlakyAdb(Adb):
         self.calls = 0
 
     def _run(self, *args: str) -> bytes:
-        if args[-1].startswith("/sdcard/") and "cat" in args:
+        if "cat" in args:
             self.calls += 1
             if self.calls <= self.fails:
                 return b"ERROR: could not get idle state."
             return (FIX / "ui_home.xml").read_bytes()
-        return b"UI hierchary dumped to: /sdcard/tts_stt_ui.xml"
+        if "dump" in args:
+            return b"UI hierchary dumped to: /sdcard/x.xml"
+        return b""
 
 
 async def test_dump_ui_retries_flaky_dump():
@@ -120,3 +122,65 @@ def test_parse_mic_active():
     assert parse_mic_active(active) is True
     assert parse_mic_active(idle) is False
     assert parse_mic_active("  riid 12; active? false\n") is False
+
+
+# --- review 2 fixes -----------------------------------------------------------
+def test_scrolled_chat_is_not_a_new_bubble():
+    """Review2 #2b: failure message scrolls the chat; the top bubble leaves the screen."""
+    from tts_stt_tool.device.ui_tree import new_bubble_after
+    after = [_bubble("y", 700), _bubble("z", 800)]
+    assert new_bubble_after(["x", "y", "z"], after, 720) is None
+    assert new_bubble_after(["x", "y", "z"], after + [_bubble("w", 900)], 720).label == "w"
+
+
+def test_find_does_not_match_other_text_by_prefix():
+    """Minor: 'Đóng' must not match a card 'Đóng cửa sổ…'."""
+    card = UiNode("", "Đóng cửa sổ trời", "android.view.View", (0, 0, 10, 10), False)
+    multi = UiNode("", "Vita đề xuất\nĐã trễ hạn", "android.view.View", (0, 0, 10, 10), False)
+    assert find([card], "Đóng") is None
+    assert find([multi], "Vita đề xuất") is multi
+
+
+class StaleDumpAdb(Adb):
+    """Real failure: dump prints an error (exit 0) and the OLD file is still on the sdcard."""
+
+    def __init__(self, fails: int):
+        super().__init__(path=Path("adb.exe"))
+        self.fails, self.dumps, self.removed = fails, 0, 0
+        self.file = (FIX / "ui_home.xml").read_text(encoding="utf-8")  # stale file from earlier
+
+    def _run(self, *args: str) -> bytes:
+        if "rm" in args:
+            self.removed += 1
+            self.file = ""
+            return b""
+        if "dump" in args:
+            self.dumps += 1
+            if self.dumps <= self.fails:
+                return b"ERROR: could not get idle state."
+            self.file = (FIX / "ui_listening.xml").read_text(encoding="utf-8")
+            return b"UI hierchary dumped to: /sdcard/x.xml"
+        if "cat" in args:
+            return self.file.encode("utf-8")
+        return b""
+
+
+async def test_dump_retry_not_fooled_by_stale_file():
+    """Review2 #3."""
+    adb = StaleDumpAdb(fails=2)
+    xml = await adb.dump_ui("serial")
+    assert "Dừng nghe" in xml  # the fresh screen, not the stale home screen
+    assert adb.dumps == 3
+
+
+async def test_truncated_dump_is_retried():
+    class Truncated(StaleDumpAdb):
+        def _run(self, *args):
+            out = super()._run(*args)
+            if "cat" in args and self.dumps == 1:
+                return out[: len(out) // 2]
+            return out
+
+    adb = Truncated(fails=0)
+    assert "Dừng nghe" in await adb.dump_ui("serial")
+    assert adb.dumps == 2

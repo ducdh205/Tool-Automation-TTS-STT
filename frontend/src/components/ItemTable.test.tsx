@@ -85,3 +85,12 @@ describe("app mode (block 2)", () => {
     expect(screen.getByText("Sai")).toBeTruthy();
   });
 });
+
+describe("app mode is read-only (review2 #6)", () => {
+  it("does not open the editor on double click", () => {
+    const item = makeItem(0, { status: "Đạt" });
+    render(<ItemTable items={[item]} onPatch={() => {}} app={new Map()} />);
+    fireEvent.doubleClick(screen.getByText("câu 0", { selector: ".cell-tts span" }));
+    expect(screen.queryByDisplayValue("câu 0")).toBeNull();
+  });
+});

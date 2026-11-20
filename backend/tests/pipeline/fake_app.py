@@ -21,7 +21,8 @@ class FakeApp:
     def __init__(self, transcript: str | None = "chỉnh nhiệt độ ghế lái lên 24 độ", *, state: str = "home",
                  auto_stop: bool = False, sheet_opens: bool = True, mic_visible: bool = True,
                  launch_fixes: bool = True, silence_dumps: int | None = None,
-                 keep_history: bool = False, mic_delay_checks: int = 0):
+                 keep_history: bool = False, mic_delay_checks: int = 0,
+                 stop_during_dump: bool = False, leave_after_stop: bool = False):
         self.transcript = transcript
         self.state = state
         self.auto_stop = auto_stop
@@ -31,6 +32,8 @@ class FakeApp:
         self.keep_history = keep_history
         self.mic_delay_checks = mic_delay_checks  # mic goes live after N mic_active() checks
         self.mic_checks = 0
+        self.stop_during_dump = stop_during_dump
+        self.leave_after_stop = leave_after_stop
         self._mic_live = mic_delay_checks == 0
         self.bubbles: list[str] = []
         self.taps: list[str] = []
@@ -49,8 +52,15 @@ class FakeApp:
                 self.state = "idle"  # gave up: "Chưa nghe rõ"
         if self.state == "background":
             return [_n("Màn hình chính", (0, 0, 720, 1650), "android.view.View")]
+        if self.state == "form":  # task form opened by a stray tap on the "Thử nói" suggestion
+            return [_n("Đóng", (624, 81, 712, 169)), _n("Chọn người", (90, 651, 299, 747)), _n("Tạo việc", (470, 1366, 688, 1454))]
+        if self.state == "dialog":
+            return [_n("Ở lại", (353, 847, 460, 943)), _n("Bỏ", (476, 847, 592, 943))]
         if self.state == "home":
             return [_n("Nói để tạo việc", MIC)] if self.mic_visible else [_n("Việc", (160, 1436, 300, 1507))]
+        return self._sheet_nodes()
+
+    def _sheet_nodes(self) -> list[UiNode]:
         out = [_n("Tạo việc", (32, 660, 608, 716), "android.view.View"), _n("Đóng", CLOSE)]
         for i, b in enumerate(self.bubbles):
             y = 900 + i * 100
@@ -73,6 +83,12 @@ class FakeApp:
             self._finish()
         elif label == "Bấm để nói":
             self.state = "listening"
+        elif label == "Bỏ":
+            self.state = "home"
+        elif label == "Ở lại":
+            self.state = "form"
+        elif label == "Đóng" and self.state == "form":
+            self.state = "dialog"
         elif label == "Đóng":
             self.state = "home"
             if not self.keep_history:
@@ -80,12 +96,21 @@ class FakeApp:
 
     async def back(self) -> None:
         self.taps.append("BACK")
+        if self.state == "form":
+            self.state = "dialog"
+            return
+        if self.state == "dialog":
+            self.state = "form"
+            return
         if self.state in ("listening", "idle"):
             self.state = "home"
-            self.bubbles = []
+            if not self.keep_history:  # the real app sometimes keeps the chat
+                self.bubbles = []
 
     async def mic_active(self) -> bool | None:
         self.mic_checks += 1
+        if self.stop_during_dump and self.state == "listening" and getattr(self, "_heard", False):
+            self._finish()  # the app stops on its own just before the tool would tap stop
         if self.state == "listening" and self.mic_checks >= self.mic_delay_checks:
             self._mic_live = True
         return self.state == "listening" and self._mic_live
@@ -106,7 +131,7 @@ class FakeApp:
             self._finish()
 
     def _finish(self) -> None:
-        self.state = "idle"
+        self.state = "home" if self.leave_after_stop else "idle"
         if self.transcript is not None and getattr(self, "_heard", False):
             self.bubbles.append(self.transcript)
         self._heard = False
