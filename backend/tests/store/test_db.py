@@ -185,3 +185,31 @@ def test_migrates_old_schema(tmp_path):
     assert "form_json" in {r[1] for r in conn.execute("PRAGMA table_info(items)")}
     assert "screenshot_path" in {r[1] for r in conn.execute("PRAGMA table_info(app_results)")}
     conn.close()
+
+
+def test_delete_audio_set_cascades_and_reports_files(store, set_id):
+    item = store.items_for_generate(set_id, None)[0]
+    store.record_generated(item["id"], "/a/only-mine.wav", 1)
+    run_id = store.create_app_run(set_id, "SER", None, "p", None)
+    other = store.create_audio_set("bộ 2", "file.xlsx", ["S1"], None, [_item("TC-9", "Hey Vita, bật đèn")])
+
+    gone = store.delete_audio_set(set_id)
+
+    assert gone == {"run_ids": [run_id], "audio_paths": ["/a/only-mine.wav"]}
+    assert store.get_audio_set(set_id) is None
+    assert store.get_items(set_id) == []
+    assert store.get_app_run(run_id) is None
+    assert [s["id"] for s in store.list_audio_sets()] == [other]
+
+
+def test_delete_audio_set_keeps_wav_shared_with_another_set(store, set_id):
+    other = store.create_audio_set("bộ 2", "file.xlsx", ["S1"], None, [_item("TC-9", "Hey Vita, bật đèn trần")])
+    for sid in (set_id, other):
+        it = store.items_for_generate(sid, None)[0]
+        store.record_generated(it["id"], "/a/shared.wav", 1)
+
+    assert store.delete_audio_set(set_id)["audio_paths"] == []
+
+
+def test_delete_unknown_audio_set_returns_none(store):
+    assert store.delete_audio_set(999) is None

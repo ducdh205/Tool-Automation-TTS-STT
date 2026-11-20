@@ -268,6 +268,19 @@ export default function App() {
     if (job) await api.cancelJob(job.id).catch((e) => notify(e.message, "error"));
   };
 
+  const deleteSet = async (id: number) => {
+    const name = sets.find((s) => s.id === id)?.name ?? `#${id}`;
+    try {
+      await api.deleteSet(id);
+      const left = await loadSets();
+      // The open set is gone: open the next one (the list is newest first) instead of a dangling id.
+      if (setIdRef.current === id) setSetId(left[0]?.id ?? null);
+      notify(`Đã xóa bộ "${name}".`);
+    } catch (e) {
+      notify((e as Error).message, "error");
+    }
+  };
+
   const report = async (format: "xlsx" | "csv") => {
     if (setId === null) return;
     try {
@@ -323,6 +336,8 @@ export default function App() {
         sets={sets}
         currentSetId={setId}
         onSelectSet={setSetId}
+        onDeleteSet={deleteSet}
+        deleteLocked={job ? `Đang chạy: ${job.name} — dừng job trước khi xóa` : null}
         device={deviceStatus}
       />
       <main className="center">

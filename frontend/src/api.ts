@@ -93,6 +93,8 @@ export const api = {
   createSet: (b: { file_id: string; sheets: string[]; name: string; mapping?: ColumnMapping }) =>
     req<{ id: number }>("POST", "/api/audio-sets", b),
   sets: () => req<AudioSet[]>("GET", "/api/audio-sets"),
+  /** Also removes its app runs, screenshots and WAVs no other set uses; 409 while a job runs. */
+  deleteSet: (setId: number) => req<{ ok: boolean }>("DELETE", `/api/audio-sets/${setId}`),
   items: (setId: number) => req<Item[]>("GET", `/api/audio-sets/${setId}/items`),
   patchItem: (id: number, patch: { text_tts?: string; enabled?: boolean }) =>
     req<Item>("PATCH", `/api/items/${id}`, patch),

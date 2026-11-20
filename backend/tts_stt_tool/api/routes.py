@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import shutil
 import time
 import uuid
 from datetime import datetime
@@ -126,6 +127,30 @@ async def create_audio_set(request: Request, body: AudioSetIn) -> dict[str, int]
 def list_audio_sets(request: Request) -> list[dict[str, Any]]:
     ctx = ctx_of(request)
     return [{**s, "summary": ctx.store.summary(s["id"])} for s in ctx.store.list_audio_sets()]
+
+
+@router.delete("/audio-sets/{set_id}")
+async def delete_audio_set(request: Request, set_id: int) -> dict[str, bool]:
+    """Delete a set, its app runs and results, their screenshots, and WAVs no other set uses."""
+    ctx = ctx_of(request)
+    _require_set(ctx, set_id)
+    job = ctx.runner.current()
+    if job is not None:  # a running job may be writing rows or files of this set
+        raise HTTPException(409, f"Đang chạy: {job['name']} — dừng job trước khi xóa")
+    gone = ctx.store.delete_audio_set(set_id)
+    if gone is None:
+        raise HTTPException(404, "Không tìm thấy bộ audio")
+
+    def cleanup() -> None:
+        for run_id in gone["run_ids"]:
+            shutil.rmtree(ctx.run_dir(run_id), ignore_errors=True)
+        cache_root = ctx.cache.root.resolve()
+        for p in map(Path, gone["audio_paths"]):
+            if p.resolve().parent == cache_root:  # never touch files outside the audio cache
+                p.unlink(missing_ok=True)
+
+    await asyncio.to_thread(cleanup)
+    return {"ok": True}
 
 
 @router.get("/audio-sets/{set_id}/items")

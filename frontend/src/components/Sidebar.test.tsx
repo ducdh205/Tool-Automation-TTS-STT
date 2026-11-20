@@ -67,3 +67,35 @@ describe("Sidebar steps", () => {
     expect(screen.getByTitle("Đổi giao diện sáng / tối")).toBeTruthy();
   });
 });
+
+describe("Sidebar audio sets", () => {
+  const set = { id: 3, name: "E2E Climate Sync", source_file: "f.xlsx", sheets: ["S1"], voice: null,
+    created_at: "", summary: { "Đạt": 1, "Chờ": 260 } };
+  const base = { section: "step1" as const, step2Ready: true, onSection: () => {}, health: null,
+    sets: [set], currentSetId: 3, onSelectSet: () => {} };
+
+  it("deletes a set after the user confirms", () => {
+    const onDeleteSet = vi.fn();
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<Sidebar {...base} onDeleteSet={onDeleteSet} />);
+    fireEvent.click(screen.getByRole("button", { name: "Xóa bộ E2E Climate Sync" }));
+    expect(confirm.mock.calls[0][0]).toContain("E2E Climate Sync");
+    expect(confirm.mock.calls[0][0]).toContain("261 câu");
+    expect(onDeleteSet).toHaveBeenCalledWith(3);
+  });
+
+  it("keeps the set when the user cancels", () => {
+    const onDeleteSet = vi.fn();
+    vi.spyOn(window, "confirm").mockReturnValue(false);
+    render(<Sidebar {...base} onDeleteSet={onDeleteSet} />);
+    fireEvent.click(screen.getByRole("button", { name: "Xóa bộ E2E Climate Sync" }));
+    expect(onDeleteSet).not.toHaveBeenCalled();
+  });
+
+  it("locks deletion while a job runs", () => {
+    render(<Sidebar {...base} onDeleteSet={() => {}} deleteLocked="Đang chạy job" />);
+    const del = screen.getByRole("button", { name: "Xóa bộ E2E Climate Sync" }) as HTMLButtonElement;
+    expect(del.disabled).toBe(true);
+    expect(del.title).toBe("Đang chạy job");
+  });
+});

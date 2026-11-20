@@ -22,7 +22,8 @@ const PATHS = {
   volUp: "M11 5 6 9H2v6h4l5 4zM15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14",
   pencil: "M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z",
   pin: "M12 17v5M9 10.8V5h6v5.8l3 3.2v2H6v-2z",
-  backspace: "M21 4H8l-7 8 7 8h13a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zM18 9l-6 6m0-6 6 6",
+  trash: "M3 6h18M8 6V4h8v2m3 0-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m5 5v6m4-6v6",
+  backspace:"M21 4H8l-7 8 7 8h13a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zM18 9l-6 6m0-6 6 6",
 } as const;
 
 export type IconName = keyof typeof PATHS;

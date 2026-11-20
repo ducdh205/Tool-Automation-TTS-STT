@@ -200,3 +200,18 @@ def test_failed_zip_build_leaves_no_file(ctx, monkeypatch):
     with pytest.raises(OSError):
         c.post(f"/api/app-runs/{run_id}/export-zip", json={})
     assert list(app.state.ctx.reports.rglob("*.zip")) == []
+
+
+def test_delete_audio_set_removes_app_run_files(ctx):
+    c, app, _, tmp_path = ctx
+    name = fast_profile(c)
+    set_id = verified_set(c, tmp_path)
+    run_id = c.post(f"/api/audio-sets/{set_id}/app-runs", json={"serial": "SER", "profile": name}).json()["id"]
+    wait_job_end(c)
+    run_dir = app.state.ctx.run_dir(run_id)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "shot.png").write_bytes(b"png")
+
+    assert c.delete(f"/api/audio-sets/{set_id}").status_code == 200
+    assert not run_dir.exists()
+    assert c.get(f"/api/app-runs/{run_id}/results").status_code == 404

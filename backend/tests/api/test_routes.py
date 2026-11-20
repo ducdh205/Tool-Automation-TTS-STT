@@ -1,4 +1,5 @@
 import time
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -279,3 +280,46 @@ def test_verify_does_not_regenerate(tmp_path):
         verify_all(c, set_id)
         assert len(tts.calls) == 2
         assert set(statuses(c, set_id).values()) >= {"Audio không đạt"}
+
+
+def test_delete_audio_set_removes_rows_and_unshared_wavs(client, tmp_path):
+    first = create_set(client, tmp_path)
+    second = create_set(client, tmp_path)  # same sentences + voice -> same cached WAVs
+    for sid in (first, second):
+        assert client.post(f"/api/audio-sets/{sid}/generate").status_code == 200
+        wait_job_end(client)
+    wavs = {i["audio_path"] for i in client.get(f"/api/audio-sets/{first}/items").json() if i["audio_path"]}
+    assert wavs
+
+    assert client.delete(f"/api/audio-sets/{first}").status_code == 200
+    assert client.get(f"/api/audio-sets/{first}/items").status_code == 404
+    assert [s["id"] for s in client.get("/api/audio-sets").json()] == [second]
+    assert all(Path(p).is_file() for p in wavs)  # still used by the second set
+
+    assert client.delete(f"/api/audio-sets/{second}").status_code == 200
+    assert not any(Path(p).exists() for p in wavs)
+    assert client.get("/api/audio-sets").json() == []
+
+
+def test_delete_audio_set_unknown_is_404(client):
+    assert client.delete("/api/audio-sets/999").status_code == 404
+
+
+def test_delete_audio_set_while_job_runs_is_409(tmp_path):
+    class SlowStt:
+        async def transcribe(self, audio, sr):
+            import asyncio
+            await asyncio.sleep(0.5)
+            return "x"
+
+    app = create_app(Settings(data_dir=tmp_path), tts=FakeTts(), stt=SlowStt(), manage_wyoming=False)
+    with TestClient(app) as c:
+        set_id = create_set(c, tmp_path)
+        assert c.post(f"/api/audio-sets/{set_id}/generate").status_code == 200
+        wait_job_end(c)
+        assert c.post(f"/api/audio-sets/{set_id}/verify").status_code == 200
+        assert c.delete(f"/api/audio-sets/{set_id}").status_code == 409
+        assert c.get(f"/api/audio-sets/{set_id}/items").status_code == 200
+        job = c.get("/api/jobs/current").json()
+        c.post(f"/api/jobs/{job['id']}/cancel")
+        wait_job_end(c)

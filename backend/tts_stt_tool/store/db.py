@@ -167,6 +167,27 @@ class Store:
     def get_audio_set(self, audio_set_id: int) -> dict[str, Any] | None:
         return next((s for s in self.list_audio_sets() if s["id"] == audio_set_id), None)
 
+    def delete_audio_set(self, audio_set_id: int) -> dict[str, list] | None:
+        """Delete a set with its items, app runs and results (cascade).
+
+        Returns the deleted run ids and the WAV paths no other set still uses (the audio cache is
+        content-addressed, so one file can back rows of several sets), or None if the set is unknown.
+        """
+        used = ("SELECT audio_path p, audio_set_id s FROM items WHERE audio_path IS NOT NULL"
+                " UNION ALL SELECT r.audio_snap, a.audio_set_id FROM app_results r"
+                " JOIN app_runs a ON a.id = r.app_run_id WHERE r.audio_snap IS NOT NULL")
+        with self._conn() as c:
+            if c.execute("SELECT 1 FROM audio_sets WHERE id=?", (audio_set_id,)).fetchone() is None:
+                return None
+            run_ids = [r["id"] for r in c.execute(
+                "SELECT id FROM app_runs WHERE audio_set_id=? ORDER BY id", (audio_set_id,))]
+            paths = [r["p"] for r in c.execute(
+                f"SELECT DISTINCT p FROM ({used}) WHERE s=?"
+                f" AND p NOT IN (SELECT p FROM ({used}) WHERE s<>?) ORDER BY p",
+                (audio_set_id, audio_set_id))]
+            c.execute("DELETE FROM audio_sets WHERE id=?", (audio_set_id,))
+        return {"run_ids": run_ids, "audio_paths": paths}
+
     def summary(self, audio_set_id: int) -> dict[str, int]:
         with self._conn() as c:
             rows = c.execute(

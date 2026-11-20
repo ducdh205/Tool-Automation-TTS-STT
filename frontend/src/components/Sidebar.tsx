@@ -1,4 +1,5 @@
 import type { AudioSet, DeviceStatus, Health } from "../api";
+import { Icon } from "./Icon";
 import { ThemeSwitch } from "./ThemeSwitch";
 
 export type Section = "step1" | "step2";
@@ -12,6 +13,10 @@ interface Props {
   sets: AudioSet[];
   currentSetId: number | null;
   onSelectSet: (id: number) => void;
+  /** Called once the user confirmed deleting a set; omit to hide the delete buttons. */
+  onDeleteSet?: (id: number) => void;
+  /** Why deleting is not possible now (a job is running): the buttons are disabled with this tooltip. */
+  deleteLocked?: string | null;
   /** Latest /api/device poll (null until the first answer). */
   device?: DeviceStatus | null;
 }
@@ -51,7 +56,7 @@ export function adbStatus(s: DeviceStatus | null): { level: Level; label: string
 }
 
 export function Sidebar({
-  section, onSection, step2Ready, health, sets, currentSetId, onSelectSet, device = null,
+  section, onSection, step2Ready, health, sets, currentSetId, onSelectSet, onDeleteSet, deleteLocked = null, device = null,
 }: Props) {
   const adb = adbStatus(device);
   const stt = { level: (health?.wyoming ? "ok" : "bad") as Level, label: "STT", title: health?.wyoming
@@ -86,18 +91,35 @@ export function Sidebar({
             const total = Object.values(s.summary).reduce((a, b) => a + b, 0);
             const passed = s.summary["Đạt"] ?? 0;
             return (
-              <button
-                key={s.id}
-                className={`set-item ${s.id === currentSetId ? "active" : ""}`}
-                onClick={() => onSelectSet(s.id)}
-                title={`${s.source_file} · ${s.sheets.join(", ")}\n${passed}/${total} câu Đạt`}
-              >
-                <span className="set-line">
-                  <span className="ellipsis">{s.name}</span>
-                  <small>{total} câu</small>
-                </span>
-                <span className="set-bar"><span style={{ width: total ? `${(passed / total) * 100}%` : 0 }} /></span>
-              </button>
+              <div key={s.id} className="set-row">
+                <button
+                  className={`set-item ${s.id === currentSetId ? "active" : ""}`}
+                  onClick={() => onSelectSet(s.id)}
+                  title={`${s.source_file} · ${s.sheets.join(", ")}\n${passed}/${total} câu Đạt`}
+                >
+                  <span className="set-line">
+                    <span className="ellipsis">{s.name}</span>
+                    <small>{total} câu</small>
+                  </span>
+                  <span className="set-bar"><span style={{ width: total ? `${(passed / total) * 100}%` : 0 }} /></span>
+                </button>
+                {onDeleteSet && (
+                  <button
+                    className="icon-btn set-delete"
+                    aria-label={`Xóa bộ ${s.name}`}
+                    title={deleteLocked ?? "Xóa bộ audio"}
+                    disabled={!!deleteLocked}
+                    onClick={() => {
+                      if (window.confirm(`Xóa bộ "${s.name}" (${total} câu)?\n\n`
+                        + "Audio, các lần test app và kết quả của bộ này sẽ bị xóa, không hoàn tác được.")) {
+                        onDeleteSet(s.id);
+                      }
+                    }}
+                  >
+                    <Icon name="trash" size={14} />
+                  </button>
+                )}
+              </div>
             );
           })}
         </div>

@@ -23,3 +23,14 @@ test("session zip: POST builds it, then the browser follows a plain link (no in-
   expect(hrefs).toEqual(["/api/exports/abc"]);
   expect(blob).not.toHaveBeenCalled();
 });
+
+test("deleteSet sends DELETE for the audio set", async () => {
+  const fetchMock = vi.fn().mockResolvedValue(
+    new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "Content-Type": "application/json" } }),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+
+  await api.deleteSet(4);
+
+  expect(fetchMock).toHaveBeenCalledWith("/api/audio-sets/4", expect.objectContaining({ method: "DELETE" }));
+});

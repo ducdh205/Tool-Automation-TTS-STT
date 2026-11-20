@@ -106,6 +106,13 @@ nav { display: flex; flex-direction: column; gap: 2px; }
 .set-bar > span { display: block; height: 100%; background: var(--ok); }
 .set-item:hover { background: var(--panel-2); }
 .set-item.active { background: var(--accent-soft); color: var(--accent); }
+/* Delete sits where the sentence count is and replaces it while the row is hovered / focused. */
+.set-row { position: relative; display: flex; flex-direction: column; }
+.set-delete { position: absolute; top: 2px; right: 4px; color: var(--muted); opacity: 0; }
+.set-delete:hover:not(:disabled) { color: var(--bad); background: var(--bad-soft); }
+.set-row:hover .set-delete, .set-delete:focus-visible { opacity: 1; }
+.set-row:hover .set-delete:disabled { opacity: .4; }
+.set-row:hover:has(.set-delete) .set-line small, .set-row:has(.set-delete:focus-visible) .set-line small { visibility: hidden; }
 .side-footer { border-top: 1px solid var(--border); padding-top: 8px; display: flex; flex-direction: column; gap: 4px; }
 .status-row { display: flex; align-items: center; gap: 10px; padding: 0 4px 0 8px; }
 .status-chip { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted); max-width: 90px; cursor: default; }

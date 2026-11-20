@@ -61,3 +61,27 @@ it("edits run settings from the action bar and saves WER as a ratio", async () =
   expect(trigger.textContent).toContain("WER ≤ 25% · 45s");
   expect(trigger.textContent).not.toContain("chưa lưu");
 });
+
+it("deletes the open audio set and opens the next one", async () => {
+  const mk = (id: number, name: string) => ({ id, name, source_file: "f.xlsx", sheets: ["S1"], voice: null,
+    created_at: "", summary: { "Chờ": 1 } });
+  vi.spyOn(api, "profiles").mockResolvedValue([]);
+  vi.spyOn(api, "device").mockResolvedValue({ adb: false, devices: [], error: null });
+  const sets = vi.spyOn(api, "sets").mockResolvedValue([mk(2, "Bộ B"), mk(1, "Bộ A")]);
+  vi.spyOn(api, "currentJob").mockResolvedValue(null);
+  vi.spyOn(api, "health").mockResolvedValue({ wyoming: true, wyoming_error: null, gpu: true, job: null });
+  vi.spyOn(api, "settings").mockResolvedValue(settings);
+  vi.spyOn(api, "appRuns").mockResolvedValue([]);
+  const items = vi.spyOn(api, "items").mockResolvedValue([]);
+  const del = vi.spyOn(api, "deleteSet").mockResolvedValue({ ok: true });
+  vi.spyOn(window, "confirm").mockReturnValue(true);
+
+  render(<App />);
+  await waitFor(() => expect(items).toHaveBeenCalledWith(2));
+  sets.mockResolvedValue([mk(1, "Bộ A")]);
+  fireEvent.click(await screen.findByRole("button", { name: "Xóa bộ Bộ B" }));
+
+  await waitFor(() => expect(del).toHaveBeenCalledWith(2));
+  await waitFor(() => expect(items).toHaveBeenCalledWith(1));
+  expect(screen.queryByText("Bộ B")).toBeNull();
+});
