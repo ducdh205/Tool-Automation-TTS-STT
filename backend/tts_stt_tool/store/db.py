@@ -26,6 +26,13 @@ class ItemStatus(StrEnum):
     ERROR = "Lỗi"
 
 
+class AppStatus(StrEnum):
+    PENDING = "Chờ"
+    PASSED = "Đúng"
+    FAILED = "Sai"
+    OP_ERROR = "Lỗi thao tác"
+
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS audio_sets (
     id INTEGER PRIMARY KEY,
@@ -48,7 +55,27 @@ CREATE TABLE IF NOT EXISTS items (
     updated_at TEXT
 );
 CREATE INDEX IF NOT EXISTS ix_items_set ON items(audio_set_id, id);
+CREATE TABLE IF NOT EXISTS app_runs (
+    id INTEGER PRIMARY KEY,
+    audio_set_id INTEGER NOT NULL REFERENCES audio_sets(id) ON DELETE CASCADE,
+    serial TEXT, device_model TEXT, profile_name TEXT, app_version TEXT,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS app_results (
+    id INTEGER PRIMARY KEY,
+    app_run_id INTEGER NOT NULL REFERENCES app_runs(id) ON DELETE CASCADE,
+    item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+    status TEXT NOT NULL,
+    app_text TEXT, wer REAL, cer REAL, ops_json TEXT, error TEXT, log TEXT,
+    updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_app_results_run ON app_results(app_run_id, id);
 """
+
+_RESULT_SELECT = (
+    "SELECT r.*, i.sheet, i.tc_id, i.turn, i.feature, i.priority, i.text_raw, i.text_tts, i.audio_path"
+    " FROM app_results r JOIN items i ON i.id = r.item_id"
+)
 
 _BLOCK1_TODO = (ItemStatus.PENDING, ItemStatus.GENERATED, ItemStatus.ERROR)
 _RESET_SQL = (
@@ -206,3 +233,64 @@ class Store:
                 (ItemStatus.ERROR.value, msg, _now(), item_id, *args),
             )
             return cur.rowcount > 0
+
+    # -- block 2 (app runs) ------------------------------------------------
+    def create_app_run(
+        self, audio_set_id: int, serial: str, device_model: str | None, profile_name: str, app_version: str | None
+    ) -> int:
+        with self._conn() as c:
+            cur = c.execute(
+                "INSERT INTO app_runs(audio_set_id, serial, device_model, profile_name, app_version, created_at)"
+                " VALUES (?,?,?,?,?,?)",
+                (audio_set_id, serial, device_model, profile_name, app_version, _now()),
+            )
+            run_id = int(cur.lastrowid)
+            c.execute(
+                "INSERT INTO app_results(app_run_id, item_id, status, updated_at)"
+                " SELECT ?, id, ?, ? FROM items WHERE audio_set_id=? AND status=? AND enabled=1 ORDER BY id",
+                (run_id, AppStatus.PENDING.value, _now(), audio_set_id, ItemStatus.PASSED.value),
+            )
+            return run_id
+
+    def get_app_run(self, run_id: int) -> dict[str, Any] | None:
+        with self._conn() as c:
+            r = c.execute("SELECT * FROM app_runs WHERE id=?", (run_id,)).fetchone()
+        return dict(r) if r else None
+
+    def list_app_runs(self, audio_set_id: int) -> list[dict[str, Any]]:
+        with self._conn() as c:
+            rows = c.execute("SELECT * FROM app_runs WHERE audio_set_id=? ORDER BY id DESC", (audio_set_id,)).fetchall()
+        return [{**dict(r), "summary": self.app_summary(r["id"])} for r in rows]
+
+    def app_results(self, run_id: int) -> list[dict[str, Any]]:
+        with self._conn() as c:
+            rows = c.execute(_RESULT_SELECT + " WHERE r.app_run_id=? ORDER BY r.id", (run_id,)).fetchall()
+        return [_item_row(r) for r in rows]
+
+    def get_app_result(self, result_id: int) -> dict[str, Any] | None:
+        with self._conn() as c:
+            r = c.execute(_RESULT_SELECT + " WHERE r.id=?", (result_id,)).fetchone()
+        return _item_row(r) if r else None
+
+    def pending_for_block2(self, run_id: int) -> list[dict[str, Any]]:
+        return [r for r in self.app_results(run_id) if r["status"] in (AppStatus.PENDING.value, AppStatus.OP_ERROR.value)]
+
+    def record_app_result(
+        self, result_id: int, status: AppStatus, app_text: str | None, result: CompareResult | None,
+        error: str | None, log: str,
+    ) -> None:
+        with self._conn() as c:
+            c.execute(
+                "UPDATE app_results SET status=?, app_text=?, wer=?, cer=?, ops_json=?, error=?, log=?, updated_at=?"
+                " WHERE id=?",
+                (status.value, app_text, result.wer if result else None, result.cer if result else None,
+                 json.dumps(result.ops_as_dicts(), ensure_ascii=False) if result else None,
+                 error, log, _now(), result_id),
+            )
+
+    def app_summary(self, run_id: int) -> dict[str, int]:
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT status, COUNT(*) n FROM app_results WHERE app_run_id=? GROUP BY status", (run_id,)
+            ).fetchall()
+        return {r["status"]: r["n"] for r in rows}
