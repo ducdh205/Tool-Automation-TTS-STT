@@ -13,6 +13,7 @@ import { ItemTable } from "./components/ItemTable";
 import { ImportDialog } from "./components/ImportDialog";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { DevicePanel } from "./components/DevicePanel";
+import { ExportZipDialog, type ZipAudio } from "./components/ExportZipDialog";
 import { clickRow, emptySelection, prune, toggleAllVisible, type Selection } from "./selection";
 
 function countByStatus(items: Item[]): Record<string, number> {
@@ -35,7 +36,7 @@ export default function App() {
   const [job, setJob] = useState<Job | null>(null);
   const [filter, setFilter] = useState<ItemStatus | "all">("all");
   const [search, setSearch] = useState("");
-  const [dialog, setDialog] = useState<"import" | "settings" | null>(null);
+  const [dialog, setDialog] = useState<"import" | "settings" | "zip" | null>(null);
   const [toast, setToast] = useState<{ text: string; kind: "info" | "error" } | null>(null);
   const [rejectWarn, setRejectWarn] = useState(0.1);
   const [deviceStatus, setDeviceStatus] = useState<DeviceStatus | null>(null);
@@ -182,7 +183,7 @@ export default function App() {
     if (setId === null) return;
     try {
       setJobLogs([]);
-      const r = await api.startAppRun(setId, serial, profile);
+      const r = await api.startAppRun(setId, serial, profile, sel2.ids.size ? [...sel2.ids] : null);
       setJob(jobAfterStart(r.job_id, finishedJobs.current));
       await loadAppRuns(setId, r.id);
     } catch (e) {
@@ -218,6 +219,25 @@ export default function App() {
     }
   };
 
+  const exportForm = async () => {
+    if (appRunId === null) return;
+    try {
+      await api.downloadFormReport(appRunId);
+    } catch (e) {
+      notifyError(e);
+    }
+  };
+
+  const exportZip = async (audio: ZipAudio) => {
+    if (appRunId === null) return;
+    try {
+      await api.downloadSessionZip(appRunId, audio, audio === "selected" ? [...sel2.ids] : null);
+      setDialog(null);
+    } catch (e) {
+      notifyError(e);
+    }
+  };
+
   const stop = async () => {
     if (job) await api.cancelJob(job.id).catch((e) => notify(e.message, "error"));
   };
@@ -232,6 +252,7 @@ export default function App() {
   };
 
   const current = sets.find((s) => s.id === setId);
+  const currentRun = appRuns.find((r) => r.id === appRunId);
 
   return (
     <div className={`layout ${appMode ? "" : "no-device"}`}>
@@ -285,6 +306,9 @@ export default function App() {
             runId={appRunId}
             busy={!!job}
             passedCount={items.filter((i) => i.status === "Đạt").length}
+            selectedCount={sel2.ids.size}
+            onExportForm={exportForm}
+            onExportZip={() => setDialog("zip")}
             onStart={startApp}
             onResume={resumeApp}
             onSelectRun={setAppRunId}
@@ -337,6 +361,15 @@ export default function App() {
           setDialog(null);
           api.settings().then((s) => setRejectWarn(s.reject_warn_ratio)).catch(() => {});
         }} />
+      )}
+      {dialog === "zip" && currentRun && (
+        <ExportZipDialog
+          totalCount={appResults.size}
+          failedCount={(currentRun.summary["Sai"] ?? 0) + (currentRun.summary["Lỗi thao tác"] ?? 0)}
+          selectedCount={sel2.ids.size}
+          onClose={() => setDialog(null)}
+          onExport={exportZip}
+        />
       )}
       {toast && <div className={`toast ${toast.kind}`}>{toast.text}</div>}
     </div>

@@ -19,3 +19,11 @@ export function renderOps(ops: WordOp[]): Segment[] {
     }
   });
 }
+
+/** Rough file size for a human: binary units, Vietnamese decimal comma ("1,1 GB", "334 MB"). */
+export function formatSize(bytes: number): string {
+  const GB = 1024 ** 3, MB = 1024 ** 2;
+  if (bytes >= GB) return `${(bytes / GB).toFixed(1).replace(".", ",")} GB`;
+  if (bytes >= MB) return `${Math.round(bytes / MB)} MB`;
+  return `${Math.round(bytes / 1024)} KB`;
+}

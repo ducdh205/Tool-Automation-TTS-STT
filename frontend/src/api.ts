@@ -112,8 +112,13 @@ export const api = {
   saveProfile: (p: AppProfile) => req<AppProfile>("PUT", `/api/profiles/${encodeURIComponent(p.name)}`, p),
   appRuns: (setId: number) => req<AppRun[]>("GET", `/api/audio-sets/${setId}/app-runs`),
   appResults: (runId: number) => req<AppResult[]>("GET", `/api/app-runs/${runId}/results`),
-  startAppRun: (setId: number, serial: string, profile: string) =>
-    req<{ id: number; job_id: string }>("POST", `/api/audio-sets/${setId}/app-runs`, { serial, profile }),
+  startAppRun: (setId: number, serial: string, profile: string, itemIds: number[] | null) =>
+    req<{ id: number; job_id: string }>("POST", `/api/audio-sets/${setId}/app-runs`,
+      { serial, profile, item_ids: itemIds }),
+  downloadFormReport: (runId: number) =>
+    downloadFile(`/api/app-runs/${runId}/form-report`, undefined, `KetQua_Phien${runId}.xlsx`),
+  downloadSessionZip: (runId: number, audio: "failed" | "all" | "selected", itemIds: number[] | null) =>
+    downloadFile(`/api/app-runs/${runId}/export-zip`, { audio, item_ids: itemIds }, `Phien${runId}.zip`),
   resumeAppRun: (runId: number) => req<{ job_id: string }>("POST", `/api/app-runs/${runId}/resume`),
   nodeAt: (serial: string, x: number, y: number) =>
     req<UiNodeInfo>("GET", `/api/device/${encodeURIComponent(serial)}/node-at?x=${x}&y=${y}`),

@@ -9,7 +9,11 @@ interface Props {
   runId: number | null;
   busy: boolean;
   passedCount: number;
+  /** Rows picked in the Step 2 table (0 = run every row that passed). */
+  selectedCount: number;
   onStart: (serial: string, profile: string) => void;
+  onExportForm: () => void;
+  onExportZip: () => void;
   onResume: (runId: number) => void;
   onSelectRun: (runId: number | null) => void;
 }
@@ -47,7 +51,7 @@ export function AppRunPanel(p: Props) {
         </label>
         <button className="btn primary" disabled={!canStart} onClick={() => p.onStart(serial, profile)}
           title={p.passedCount ? "" : "Chạy Khối 1 trước: chỉ câu Đạt mới được test trên app"}>
-          Chạy trên app
+          Chạy trên app ({p.selectedCount || "tất cả"})
         </button>
         <span className="spacer" />
         <label className="inline">Lần test
@@ -58,6 +62,14 @@ export function AppRunPanel(p: Props) {
         </label>
         <button className="btn" disabled={!run || p.busy || pending === 0} onClick={() => run && p.onResume(run.id)}>
           Chạy tiếp{pending ? ` (${pending})` : ""}
+        </button>
+        <button className="btn" disabled={!run} onClick={p.onExportForm}
+          title="File Excel theo form testcase: cột Kết quả thực tế, KQ ASR, Bằng chứng…">
+          Xuất Excel (form)
+        </button>
+        <button className="btn" disabled={!run} onClick={p.onExportZip}
+          title="Mỗi testcase một folder: kết quả, log, ảnh chụp, audio">
+          Xuất zip phiên
         </button>
       </div>
       <div className="small muted">

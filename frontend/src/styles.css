@@ -207,3 +207,4 @@ nav { display: flex; flex-direction: column; gap: 2px; }
 .row-actions { display: flex; gap: 2px; justify-content: flex-end; }
 .icon-btn.off { color: var(--muted); }
 .icon-btn:disabled { opacity: .4; cursor: default; }
+.radio-line { display: flex; align-items: center; gap: 8px; font-weight: 400; }
