@@ -22,10 +22,12 @@ export function RunSettings({ settings, busy, saving, onSave }: Props) {
   const wer = draft.wer ?? savedWer;
   const timeout = draft.timeout ?? savedTimeout;
   const changed = voice !== savedVoice || wer !== savedWer || timeout !== savedTimeout;
+  const locked = busy || saving;
+  const edit = (field: "voice" | "wer" | "timeout") => (value: string) => setDraft((d) => ({ ...d, [field]: value }));
 
   const save = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (busy || saving || !changed) return;
+    if (locked || !changed) return;
     if (Number(timeout) <= 0) {
       setError("Thời gian chờ STT phải lớn hơn 0 giây.");
       return;
@@ -45,20 +47,19 @@ export function RunSettings({ settings, busy, saving, onSave }: Props) {
 
   return (
     <form className="run-settings" onSubmit={save} aria-label="Cài đặt chạy">
-      <VoicePicker voice={voice} savedVoice={savedVoice} disabled={busy || saving}
-        onChange={(selected) => setDraft({ ...draft, voice: selected })} />
+      <VoicePicker voice={voice} savedVoice={savedVoice} disabled={locked} onChange={edit("voice")} />
       <div className="field run-number">
         <label htmlFor="run-wer">Ngưỡng WER để đạt (%)</label>
-        <input id="run-wer" type="number" min={0} max={100} step="any" required value={wer} disabled={busy || saving}
-          aria-describedby="run-wer-note" onChange={(event) => setDraft({ ...draft, wer: event.target.value })} />
+        <input id="run-wer" type="number" min={0} max={100} step="any" required value={wer} disabled={locked}
+          aria-describedby="run-wer-note" onChange={(event) => edit("wer")(event.target.value)} />
         <small id="run-wer-note" className="muted">0% là khớp hoàn toàn</small>
       </div>
       <div className="field run-number">
         <label htmlFor="run-timeout">Thời gian chờ STT (giây)</label>
-        <input id="run-timeout" type="number" min={0} max={600} step="any" required value={timeout} disabled={busy || saving}
-          onChange={(event) => setDraft({ ...draft, timeout: event.target.value })} />
+        <input id="run-timeout" type="number" min={0} max={600} step="any" required value={timeout} disabled={locked}
+          onChange={(event) => edit("timeout")(event.target.value)} />
       </div>
-      <button className="btn" type="submit" disabled={busy || saving || !changed}>
+      <button className="btn" type="submit" disabled={locked || !changed}>
         {saving ? "Đang lưu…" : "Lưu cài đặt"}
       </button>
       {error && <div className="error run-settings-error" role="alert">{error}</div>}

@@ -26,13 +26,15 @@ export function VoicePicker({ voice, savedVoice, disabled, onChange }: Props) {
     audio?.pause();
   }, []);
 
+  const stopPreview = useCallback((status: "idle" | "error" = "idle") => {
+    stopAudio();
+    setPreviewStatus(status);
+  }, [stopAudio]);
+
   useEffect(() => stopAudio, [stopAudio]);
   useEffect(() => {
-    if (disabled) {
-      stopAudio();
-      setPreviewStatus("idle");
-    }
-  }, [disabled, stopAudio]);
+    if (disabled) stopPreview();
+  }, [disabled, stopPreview]);
 
   const loadVoices = () => {
     if (voiceStatus === "ready" || voiceStatus === "loading") return;
@@ -45,17 +47,14 @@ export function VoicePicker({ voice, savedVoice, disabled, onChange }: Props) {
 
   const playPreview = async () => {
     if (preview.current) {
-      stopAudio();
-      setPreviewStatus("idle");
+      stopPreview();
       return;
     }
     const audio = new Audio(api.voicePreviewUrl(voice));
     preview.current = audio;
     setPreviewStatus("loading");
     const finish = (status: "idle" | "error") => {
-      if (preview.current !== audio) return;
-      stopAudio();
-      setPreviewStatus(status);
+      if (preview.current === audio) stopPreview(status);
     };
     audio.onended = () => finish("idle");
     audio.onerror = () => finish("error");
@@ -84,8 +83,7 @@ export function VoicePicker({ voice, savedVoice, disabled, onChange }: Props) {
         <select id="run-voice" value={voice} disabled={disabled}
           onFocus={loadVoices} onPointerDown={loadVoices}
           onChange={(event) => {
-            stopAudio();
-            setPreviewStatus("idle");
+            stopPreview();
             onChange(event.target.value);
           }} aria-describedby="run-voice-note">
           {showSaved && <option value={savedVoice}>{savedLabel}</option>}
