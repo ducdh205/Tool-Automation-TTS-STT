@@ -1,4 +1,4 @@
-import type { AudioSet, Health } from "../api";
+import type { AudioSet, DeviceStatus, Health } from "../api";
 
 export type Section = "data" | "block1" | "app" | "report";
 
@@ -10,6 +10,8 @@ interface Props {
   currentSetId: number | null;
   onSelectSet: (id: number) => void;
   onSettings: () => void;
+  /** Latest /api/device poll (null until the first answer). */
+  device?: DeviceStatus | null;
 }
 
 const NAV: { id: Section; label: string; hint: string; disabled?: boolean }[] = [
@@ -19,16 +21,35 @@ const NAV: { id: Section; label: string; hint: string; disabled?: boolean }[] = 
   { id: "report", label: "Báo cáo", hint: "Xuất Excel / CSV" },
 ];
 
-function Dot({ ok, label, title }: { ok: boolean; label: string; title?: string }) {
+type Level = "ok" | "warn" | "bad" | "off";
+
+function Dot({ ok, level, label, title }: { ok?: boolean; level?: Level; label: string; title?: string }) {
   return (
     <div className="status-line" title={title}>
-      <span className={`dot ${ok ? "ok" : "bad"}`} />
-      {label}
+      <span className={`dot ${level ?? (ok ? "ok" : "bad")}`} />
+      <span className="ellipsis">{label}</span>
     </div>
   );
 }
 
-export function Sidebar({ section, onSection, health, sets, currentSetId, onSelectSet, onSettings }: Props) {
+const STATE_HINT: Record<string, string> = { unauthorized: "chưa cho phép", offline: "mất kết nối" };
+
+/** One-line ADB summary for the sidebar footer: prefers an online device, names it by model (else serial). */
+export function adbStatus(s: DeviceStatus | null): { level: Level; label: string; title?: string } {
+  if (!s) return { level: "off", label: "ADB: đang kiểm tra…" };
+  if (!s.adb) return { level: "bad", label: "ADB: không tìm thấy adb", title: s.error ?? undefined };
+  if (s.devices.length === 0) return { level: "bad", label: "ADB: chưa có thiết bị", title: "Cắm cáp USB và bật Gỡ lỗi USB" };
+  const d = s.devices.find((x) => x.state === "device") ?? s.devices[0];
+  const extra = s.devices.length > 1 ? ` (+${s.devices.length - 1})` : "";
+  const online = d.state === "device";
+  return {
+    level: online ? "ok" : "warn",
+    label: `ADB · ${d.model ?? d.serial}${extra}${online ? "" : ` — ${STATE_HINT[d.state] ?? d.state}`}`,
+    title: s.devices.map((x) => `${x.model ?? "Android"} · ${x.serial} · ${x.state}`).join("\n"),
+  };
+}
+
+export function Sidebar({ section, onSection, health, sets, currentSetId, onSelectSet, onSettings, device = null }: Props) {
   return (
     <aside className="sidebar">
       <div className="brand">TTS → STT<small>Automation test</small></div>
@@ -67,8 +88,7 @@ export function Sidebar({ section, onSection, health, sets, currentSetId, onSele
       <div className="side-footer">
         <Dot ok={!!health?.wyoming} label="STT tham chiếu (wyoming)" title={health?.wyoming_error ?? undefined} />
         <Dot ok={!!health?.gpu} label={health?.gpu ? "GPU" : "TTS chạy CPU"} />
-
-        
+        <Dot {...adbStatus(device)} />
         <button className="nav-item small-btn" onClick={onSettings}>Cài đặt</button>
       </div>
     </aside>

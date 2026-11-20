@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  api, type AppProfile, type AppResult, type AppRun, type AudioSet, type DeviceInfo, type Health, type Item,
+  api, type AppProfile, type AppResult, type AppRun, type AudioSet, type DeviceStatus, type Health, type Item,
   type ItemStatus, type Job, type ProgressEvent,
 } from "./api";
 import { classifyEvent } from "./events";
@@ -32,7 +32,8 @@ export default function App() {
   const [dialog, setDialog] = useState<"import" | "settings" | null>(null);
   const [toast, setToast] = useState<{ text: string; kind: "info" | "error" } | null>(null);
   const [rejectWarn, setRejectWarn] = useState(0.1);
-  const [devices, setDevices] = useState<DeviceInfo[]>([]);
+  const [deviceStatus, setDeviceStatus] = useState<DeviceStatus | null>(null);
+  const devices = deviceStatus?.devices ?? [];
   const [profiles, setProfiles] = useState<AppProfile[]>([]);
   const [appRuns, setAppRuns] = useState<AppRun[]>([]);
   const [appRunId, setAppRunId] = useState<number | null>(null);
@@ -72,7 +73,7 @@ export default function App() {
 
   useEffect(() => {
     api.profiles().then(setProfiles).catch(() => {});
-    const tick = () => api.device().then((d) => setDevices(d.devices)).catch(() => setDevices([]));
+    const tick = () => api.device().then(setDeviceStatus).catch(() => setDeviceStatus(null));
     tick();
     const t = window.setInterval(tick, 4000);
     return () => window.clearInterval(t);
@@ -221,6 +222,7 @@ export default function App() {
         currentSetId={setId}
         onSelectSet={setSetId}
         onSettings={() => setDialog("settings")}
+        device={deviceStatus}
       />
       <main className="center">
         <div className="center-head">

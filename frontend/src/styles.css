@@ -71,6 +71,7 @@ nav { display: flex; flex-direction: column; gap: 2px; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
 .dot.ok { background: var(--ok); }
 .dot.bad { background: var(--bad); }
+.dot.warn { background: var(--warn); }
 .dot.off { background: var(--border); }
 
 /* center */
