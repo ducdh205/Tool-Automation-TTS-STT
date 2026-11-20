@@ -156,3 +156,46 @@ def test_settings_roundtrip_and_health(client):
 def test_unknown_set_404(client):
     assert client.get("/api/audio-sets/999/items").status_code == 404
     assert client.post("/api/audio-sets/999/block1").status_code == 404
+
+
+# --- final review fixes -------------------------------------------------------
+def test_patch_rejects_text_without_words(client, tmp_path):
+    set_id = create_set(client, tmp_path)
+    item = client.get(f"/api/audio-sets/{set_id}/items").json()[0]
+    assert client.patch(f"/api/items/{item['id']}", json={"text_tts": "👍"}).status_code == 422
+
+
+def test_patch_text_is_nfc(client, tmp_path):
+    import unicodedata
+
+    set_id = create_set(client, tmp_path)
+    item = client.get(f"/api/audio-sets/{set_id}/items").json()[0]
+    r = client.patch(f"/api/items/{item['id']}", json={"text_tts": unicodedata.normalize("NFD", "Bật hòa")})
+    assert r.json()["text_tts"] == unicodedata.normalize("NFC", "Bật hòa")
+
+
+def test_settings_validation(client):
+    s = client.get("/api/settings").json()
+    assert client.put("/api/settings", json={**s, "max_regen": "abc"}).status_code == 422
+    assert client.put("/api/settings", json={**s, "max_regen": -1}).status_code == 422
+    assert client.put("/api/settings", json={**s, "wer_threshold": 2}).status_code == 422
+    assert client.put("/api/settings", json={**s, "stt_timeout_s": 0}).status_code == 422
+
+
+def test_stt_timeout_applies_without_restart(tmp_path):
+    """Review #7: saved stt_timeout_s must reach the WyomingStt in use."""
+    app = create_app(Settings(data_dir=tmp_path), tts=FakeTts(), manage_wyoming=False)
+    with TestClient(app) as c:
+        s = c.get("/api/settings").json()
+        assert c.put("/api/settings", json={**s, "stt_timeout_s": 7}).status_code == 200
+        assert app.state.ctx.stt.timeout_s == 7
+
+
+def test_audio_not_cached_by_browser(client, tmp_path):
+    """Review #8."""
+    set_id = create_set(client, tmp_path)
+    client.post(f"/api/audio-sets/{set_id}/block1")
+    wait_job_end(client)
+    item = client.get(f"/api/audio-sets/{set_id}/items").json()[0]
+    r = client.get(f"/api/items/{item['id']}/audio")
+    assert r.headers["cache-control"] == "no-store"

@@ -11,12 +11,13 @@ from tts_stt_tool.compare.score import CompareResult, compare
 from tts_stt_tool.config import Settings
 from tts_stt_tool.jobs.runner import Emit, ProgressEvent
 from tts_stt_tool.store.db import ItemStatus, Store
-from tts_stt_tool.stt.wyoming_client import SttEngine
+from tts_stt_tool.stt.wyoming_client import SttEngine, SttError
 from tts_stt_tool.tts.base import TtsEngine
 from tts_stt_tool.tts.cache import AudioCache, cache_key
 
 _LOG = logging.getLogger(__name__)
 MAX_CONSECUTIVE_ERRORS = 3
+_TODO = (ItemStatus.PENDING.value, ItemStatus.GENERATED.value, ItemStatus.ERROR.value)
 
 
 async def _audio_for(tts: TtsEngine, cache: AudioCache, text: str, voice: str, attempt: int):
@@ -29,20 +30,27 @@ async def _audio_for(tts: TtsEngine, cache: AudioCache, text: str, voice: str, a
     return audio, sr, path
 
 
+class _Superseded(Exception):
+    """The row was edited while being processed; its new text will be handled later."""
+
+
 async def _verify_item(store, item, tts, cache, stt, settings, voice) -> None:
     text = item["text_tts"]
     last: tuple[str, CompareResult] | None = None
     for attempt in range(settings.max_regen + 1):
         audio, sr, path = await _audio_for(tts, cache, text, voice, attempt)
-        store.record_generated(item["id"], str(path), attempt + 1)
+        if not store.record_generated(item["id"], str(path), attempt + 1, text_tts=text):
+            raise _Superseded
         hyp = await stt.transcribe(audio, sr)
         result = compare(text, hyp, settings.wer_threshold)
         last = (hyp, result)
         if result.correct:
-            store.record_verify(item["id"], hyp, result, ItemStatus.PASSED)
+            if not store.record_verify(item["id"], hyp, result, ItemStatus.PASSED, text_tts=text):
+                raise _Superseded
             return
     assert last is not None
-    store.record_verify(item["id"], last[0], last[1], ItemStatus.AUDIO_FAILED)
+    if not store.record_verify(item["id"], last[0], last[1], ItemStatus.AUDIO_FAILED, text_tts=text):
+        raise _Superseded
 
 
 async def run_block1(
@@ -59,22 +67,32 @@ async def run_block1(
     voice = audio_set.get("voice") or settings.voice or ""
     todo = store.pending_for_block1(audio_set_id)
     total = len(todo)
-    consecutive_errors = 0
-    for done, item in enumerate(todo):
+    consecutive_stt_errors = 0
+    for done, queued in enumerate(todo):
         if cancel.is_set():
             emit(ProgressEvent("", "cancelled", done, total))
             return
+        # Re-read: the user may have edited, disabled or re-run this row since the queue was built.
+        item = store.get_item(queued["id"])
+        if not item or not item["enabled"] or not item["text_tts"] or item["status"] not in _TODO:
+            emit(ProgressEvent("", "progress", done + 1, total))
+            continue
         try:
             await _verify_item(store, item, tts, cache, stt, settings, voice)
-            consecutive_errors = 0
-        except Exception as e:  # one bad item (SttError, TTS failure) must not stop the run
-            _LOG.warning("block1 item %s failed: %s", item["id"], e)
-            store.record_error(item["id"], str(e) or type(e).__name__)
-            consecutive_errors += 1
-            if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+            consecutive_stt_errors = 0
+        except _Superseded:
+            _LOG.info("block1 item %s edited during processing; result dropped", item["id"])
+        except SttError as e:  # infrastructure: wyoming down/hung -> stop after a few in a row
+            _LOG.warning("block1 item %s STT failed: %s", item["id"], e)
+            store.record_error(item["id"], str(e), text_tts=item["text_tts"])
+            consecutive_stt_errors += 1
+            if consecutive_stt_errors >= MAX_CONSECUTIVE_ERRORS:
                 emit(ProgressEvent("", "item", done + 1, total, item=store.get_item(item["id"])))
                 emit(ProgressEvent("", "error", done + 1, total,
-                                   message=f"Dừng sau {MAX_CONSECUTIVE_ERRORS} lỗi liên tiếp: {e}"))
+                                   message=f"Dừng sau {MAX_CONSECUTIVE_ERRORS} lỗi STT liên tiếp: {e}"))
                 return
+        except Exception as e:  # per-item problem (TTS failure, bad text): mark and continue
+            _LOG.warning("block1 item %s failed: %s", item["id"], e)
+            store.record_error(item["id"], str(e) or type(e).__name__, text_tts=item["text_tts"])
         emit(ProgressEvent("", "item", done + 1, total, item=store.get_item(item["id"])))
     emit(ProgressEvent("", "done", total, total))

@@ -171,25 +171,38 @@ class Store:
         with self._conn() as c:
             c.execute("UPDATE items SET enabled=?, updated_at=? WHERE id=?", (int(enabled), _now(), item_id))
 
-    def record_generated(self, item_id: int, audio_path: str, attempts: int) -> None:
-        with self._conn() as c:
-            c.execute(
-                "UPDATE items SET audio_path=?, attempts=?, status=?, error=NULL, updated_at=? WHERE id=?",
-                (audio_path, attempts, ItemStatus.GENERATED.value, _now(), item_id),
-            )
+    @staticmethod
+    def _guard(text_tts: str | None) -> tuple[str, tuple[Any, ...]]:
+        """Extra WHERE so a result computed for an old text never lands on an edited row."""
+        return (" AND text_tts=?", (text_tts,)) if text_tts is not None else ("", ())
 
-    def record_verify(self, item_id: int, ref_text: str, result: CompareResult, status: ItemStatus) -> None:
+    def record_generated(self, item_id: int, audio_path: str, attempts: int, text_tts: str | None = None) -> bool:
+        where, args = self._guard(text_tts)
         with self._conn() as c:
-            c.execute(
+            cur = c.execute(
+                "UPDATE items SET audio_path=?, attempts=?, status=?, error=NULL, updated_at=? WHERE id=?" + where,
+                (audio_path, attempts, ItemStatus.GENERATED.value, _now(), item_id, *args),
+            )
+            return cur.rowcount > 0
+
+    def record_verify(
+        self, item_id: int, ref_text: str, result: CompareResult, status: ItemStatus, text_tts: str | None = None
+    ) -> bool:
+        where, args = self._guard(text_tts)
+        with self._conn() as c:
+            cur = c.execute(
                 "UPDATE items SET ref_text=?, wer=?, cer=?, ops_json=?, status=?, error=NULL, updated_at=?"
-                " WHERE id=?",
+                " WHERE id=?" + where,
                 (ref_text, result.wer, result.cer, json.dumps(result.ops_as_dicts(), ensure_ascii=False),
-                 status.value, _now(), item_id),
+                 status.value, _now(), item_id, *args),
             )
+            return cur.rowcount > 0
 
-    def record_error(self, item_id: int, msg: str) -> None:
+    def record_error(self, item_id: int, msg: str, text_tts: str | None = None) -> bool:
+        where, args = self._guard(text_tts)
         with self._conn() as c:
-            c.execute(
-                "UPDATE items SET status=?, error=?, updated_at=? WHERE id=?",
-                (ItemStatus.ERROR.value, msg, _now(), item_id),
+            cur = c.execute(
+                "UPDATE items SET status=?, error=?, updated_at=? WHERE id=?" + where,
+                (ItemStatus.ERROR.value, msg, _now(), item_id, *args),
             )
+            return cur.rowcount > 0

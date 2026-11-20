@@ -42,3 +42,26 @@ def test_not_equivalent(a, b):
 
 def test_output_is_lowercase_single_spaced():
     assert normalize("  Bật,   ĐÈN  trần.  ") == "bật đèn trần"
+
+
+# --- final review fixes (review #5) ------------------------------------------
+@pytest.mark.parametrize(
+    ("a", "b"),
+    [
+        ("1.000 người", "một nghìn người"),
+        ("2.500.000 đồng", "hai triệu năm trăm nghìn đồng"),
+        ("3,5 độ", "ba phẩy năm độ"),
+        ("9:30", "chín giờ ba mươi"),
+        ("0912345678", "không chín một hai ba bốn năm sáu bảy tám"),
+        ("gọi 0912", "gọi không chín một hai"),
+        ("hai mốt độ", "21 độ"),
+        ("hai tư độ", "24 độ"),
+        ("hai lăm độ", "25 độ"),
+    ],
+)
+def test_more_number_forms(a, b):
+    assert normalize(a) == normalize(b)
+
+
+def test_digit_by_digit_is_space_padded():
+    assert normalize("abc0912").split()[-4:] == ["không", "chín", "một", "hai"]

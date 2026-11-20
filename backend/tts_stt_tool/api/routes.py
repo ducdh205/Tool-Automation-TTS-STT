@@ -11,16 +11,18 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 from tts_stt_tool.api.app import AppContext
-from tts_stt_tool.config import Settings, save_settings
+from tts_stt_tool.config import save_settings
+from tts_stt_tool.input.filters import clean_text, has_words
 from tts_stt_tool.input.generic import ColumnMapping, preview_columns, read_generic
 from tts_stt_tool.input.testcase_form import InputError, list_sheets, read_testcase_items
 from tts_stt_tool.jobs.runner import JobBusyError
 from tts_stt_tool.pipeline.block1 import run_block1
 from tts_stt_tool.report.excel import build_block1_report, export_block1_csv
 from tts_stt_tool.store.db import ItemStatus
+from tts_stt_tool.stt.wyoming_client import WyomingStt
 
 router = APIRouter()
 XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -141,9 +143,9 @@ def patch_item(request: Request, item_id: int, body: ItemPatch) -> dict[str, Any
     if ctx.store.get_item(item_id) is None:
         raise HTTPException(404, "Không tìm thấy câu")
     if body.text_tts is not None:
-        text = " ".join(body.text_tts.split())
-        if not text:
-            raise HTTPException(422, "Câu đọc không được để trống")
+        text = clean_text(body.text_tts)
+        if not has_words(text):
+            raise HTTPException(422, "Câu đọc phải có chữ để đọc")
         ctx.store.set_item_text(item_id, text)
     if body.enabled is not None:
         ctx.store.set_enabled(item_id, body.enabled)
@@ -155,7 +157,8 @@ def item_audio(request: Request, item_id: int) -> FileResponse:
     item = ctx_of(request).store.get_item(item_id)
     if not item or not item["audio_path"] or not Path(item["audio_path"]).is_file():
         raise HTTPException(404, "Chưa có audio")
-    return FileResponse(item["audio_path"], media_type="audio/wav")
+    # no-store: after an edit the same item id serves a different file
+    return FileResponse(item["audio_path"], media_type="audio/wav", headers={"Cache-Control": "no-store"})
 
 
 # -- jobs ---------------------------------------------------------------------
@@ -208,17 +211,30 @@ def get_settings(request: Request) -> dict[str, Any]:
     return ctx_of(request).settings.to_json()
 
 
+class SettingsIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    voice: str | None = None
+    max_regen: int = Field(ge=0, le=10)
+    wer_threshold: float = Field(ge=0, le=1)
+    reject_warn_ratio: float = Field(ge=0, le=1)
+    wyoming_host: str
+    wyoming_port: int = Field(ge=1, le=65535)
+    stt_timeout_s: float = Field(gt=0, le=600)
+    wyoming_cmd: list[str] = []
+    port: int = Field(ge=1, le=65535)
+
+
 @router.put("/settings")
-def put_settings(request: Request, body: dict[str, Any]) -> dict[str, Any]:
+def put_settings(request: Request, body: SettingsIn) -> dict[str, Any]:
     ctx = ctx_of(request)
-    current = ctx.settings.to_json()
-    unknown = set(body) - set(current)
-    if unknown:
-        raise HTTPException(422, f"Khóa không hợp lệ: {', '.join(sorted(unknown))}")
-    merged = Settings(data_dir=ctx.settings.data_dir, **{**current, **body})
-    for k in current:
-        setattr(ctx.settings, k, getattr(merged, k))
+    for k, v in body.model_dump().items():
+        setattr(ctx.settings, k, v)
     save_settings(ctx.settings)
+    if isinstance(ctx.stt, WyomingStt):  # apply without restart
+        ctx.stt.host = ctx.settings.wyoming_host
+        ctx.stt.port = ctx.settings.wyoming_port
+        ctx.stt.timeout_s = ctx.settings.stt_timeout_s
     return ctx.settings.to_json()
 
 

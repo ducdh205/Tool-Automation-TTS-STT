@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, type AudioSet, type Health, type Item, type ItemStatus, type Job, type ProgressEvent } from "./api";
 import { connectEvents } from "./ws";
+import { jobAfterStart, jobFromServer } from "./jobState";
 import { Sidebar, type Section } from "./components/Sidebar";
 import { RunBar } from "./components/RunBar";
 import { ItemTable } from "./components/ItemTable";
@@ -27,6 +28,7 @@ export default function App() {
   const [toast, setToast] = useState<{ text: string; kind: "info" | "error" } | null>(null);
   const [rejectWarn, setRejectWarn] = useState(0.1);
   const setIdRef = useRef<number | null>(null);
+  const finishedJobs = useRef(new Set<string>());
   setIdRef.current = setId;
 
   const notify = (text: string, kind: "info" | "error" = "info") => {
@@ -48,7 +50,9 @@ export default function App() {
     loadSets().then((s) => { if (s[0]) setSetId(s[0].id); }).catch((e) => notify(e.message, "error"));
     api.currentJob().then(setJob).catch(() => {});
     api.settings().then((s) => setRejectWarn(s.reject_warn_ratio)).catch(() => {});
-    const poll = () => api.health().then(setHealth).catch(() => setHealth(null));
+    const poll = () => api.health()
+      .then((h) => { setHealth(h); setJob((j) => jobFromServer(j, h.job)); })
+      .catch(() => setHealth(null));
     poll();
     const t = window.setInterval(poll, 5000);
     return () => window.clearInterval(t);
@@ -67,6 +71,7 @@ export default function App() {
     } else if (e.kind === "progress") {
       setJob((j) => (j ? { ...j, done: e.done, total: e.total } : j));
     } else {
+      finishedJobs.current.add(e.job_id);
       setJob(null);
       loadSets().catch(() => {});
       if (setIdRef.current !== null) loadItems(setIdRef.current).catch(() => {});
@@ -74,6 +79,9 @@ export default function App() {
       if (e.kind === "cancelled") notify("Đã dừng. Bấm chạy lại để tiếp tục từ câu chưa xong.");
       if (e.kind === "error") notify(`Job dừng vì lỗi: ${e.message}`, "error");
     }
+  }, (up) => {
+    // After a (re)connect we may have missed a terminal event: ask the server.
+    if (up) api.currentJob().then((cur) => setJob((j) => jobFromServer(j, cur))).catch(() => {});
   }), [loadItems, loadSets]);
 
   const visible = useMemo(() => {
@@ -97,7 +105,7 @@ export default function App() {
     if (setId === null) return;
     try {
       const r = await api.startBlock1(setId);
-      setJob({ id: r.job_id, name: "Khối 1", done: 0, total: 0 });
+      setJob(jobAfterStart(r.job_id, finishedJobs.current));
       setSection("block1");
     } catch (e) {
       notify((e as Error).message, "error");

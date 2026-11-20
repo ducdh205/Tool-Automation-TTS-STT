@@ -59,7 +59,9 @@ function EditableText({ item, onSave }: { item: Item; onSave: (t: string) => voi
 
 function PlayButton({ item }: { item: Item }) {
   if (!item.audio_path) return <span className="muted">·</span>;
-  const play = () => { void new Audio(api.audioUrl(item.id, String(item.attempts))).play(); };
+  // The file name is the cache key (text+voice+attempt): it changes whenever the audio does.
+  const version = item.audio_path.split(/[\\/]/).pop() ?? "";
+  const play = () => { void new Audio(api.audioUrl(item.id, version)).play(); };
   return <button className="icon-btn" title="Nghe audio" onClick={play}>▶</button>;
 }
 

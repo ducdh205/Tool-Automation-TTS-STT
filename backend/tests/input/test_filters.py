@@ -68,3 +68,26 @@ def test_classify_skips(speaker, text, reason):
 )
 def test_classify_keeps(speaker, text, expected):
     assert classify(_item(speaker, text)) == (expected, None)
+
+
+# --- final review fixes -------------------------------------------------------
+@pytest.mark.parametrize("text", ["-", "*", '""', "👍", "...", "?!"])
+def test_symbol_only_rows_are_skipped(text):
+    """Review #2: rows that normalize to nothing must not reach the pipeline."""
+    assert classify(_item(USER, text)) == (None, REASON_UNREADABLE)
+
+
+def test_text_is_nfc_for_tts():
+    """Review #4: TTS must receive composed (NFC) Vietnamese."""
+    import unicodedata
+
+    nfd = unicodedata.normalize("NFD", "Bật điều hòa")
+    text, _ = classify(_item(USER, nfd))
+    assert text == unicodedata.normalize("NFC", "Bật điều hòa")
+
+
+def test_excel_cr_escape_is_decoded():
+    """Review #3: openpyxl leaves Excel's _x000D_ escape in shared strings."""
+    from tts_stt_tool.input.testcase_form import cell_text
+
+    assert classify(_item(USER, cell_text("Mở nhạc_x000D_\nđi"))) == ("Mở nhạc đi", None)

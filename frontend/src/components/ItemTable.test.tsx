@@ -55,3 +55,17 @@ describe("ItemTable", () => {
     expect(onPatch).toHaveBeenCalledWith(1, { enabled: false });
   });
 });
+
+describe("audio playback (review #8)", () => {
+  it("uses the audio file name as cache-buster", () => {
+    const srcs: string[] = [];
+    (globalThis as unknown as { Audio: unknown }).Audio = class {
+      constructor(src: string) { srcs.push(src); }
+      play() { return Promise.resolve(); }
+    };
+    const item = makeItem(0, { audio_path: String.raw`E:\data\audio\a1b2c3d4e5f60718.wav`, attempts: 1, status: "Đạt" });
+    render(<ItemTable items={[item]} onPatch={() => {}} />);
+    fireEvent.click(screen.getByTitle("Nghe audio"));
+    expect(srcs[0]).toBe("/api/items/1/audio?v=a1b2c3d4e5f60718.wav");
+  });
+});

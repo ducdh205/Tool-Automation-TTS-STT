@@ -172,3 +172,60 @@ async def test_item_event_carries_row(env):
     item_events = [e for e in events if e.kind == "item"]
     assert item_events[0].item["status"] == ItemStatus.PASSED.value
     assert item_events[0].item["audio_path"].endswith(".wav")
+
+
+# --- final review fixes -------------------------------------------------------
+async def test_edit_during_run_does_not_record_old_audio(env):
+    """Review #1: user edits a row while the job is transcribing it."""
+    store, settings, cache = env
+    set_id = make_set(store, ["câu cũ"])
+    item_id = store.get_items(set_id)[0]["id"]
+    tts = FakeTts()
+
+    class EditingStt:
+        async def transcribe(self, audio, sr):
+            store.set_item_text(item_id, "câu mới")
+            return "câu cũ"
+
+    await run(store, set_id, tts, cache, EditingStt(), settings)
+    row = store.get_item(item_id)
+    assert row["text_tts"] == "câu mới"
+    assert row["status"] == ItemStatus.PENDING.value
+    assert row["ref_text"] is None
+    assert row["audio_path"] is None
+
+
+async def test_item_edited_before_its_turn_uses_new_text(env):
+    store, settings, cache = env
+    set_id = make_set(store, ["một", "hai cũ"])
+    second = store.get_items(set_id)[1]["id"]
+    tts = FakeTts()
+
+    class EditFirst:
+        async def transcribe(self, audio, sr):
+            if tts.calls[-1][0] == "một":
+                store.set_item_text(second, "hai mới")
+            return tts.calls[-1][0]
+
+    await run(store, set_id, tts, cache, EditFirst(), settings)
+    row = store.get_item(second)
+    assert row["text_tts"] == "hai mới"
+    assert row["status"] == ItemStatus.PASSED.value
+    assert ("hai cũ", 0) not in tts.calls
+
+
+async def test_per_item_failures_do_not_abort(env):
+    """Review #2: only infrastructure (STT) errors count toward the abort."""
+    store, settings, cache = env
+    set_id = make_set(store, ["b1", "b2", "b3", "b4"])
+
+    class BrokenTts(FakeTts):
+        def synthesize(self, text, voice, attempt):
+            if text != "b4":
+                raise RuntimeError("TTS hỏng câu này")
+            return super().synthesize(text, voice, attempt)
+
+    tts = BrokenTts()
+    events = await run(store, set_id, tts, cache, ScriptedStt({"b4": ["b4"]}, tts), settings)
+    assert events[-1].kind == "done"
+    assert store.summary(set_id) == {ItemStatus.ERROR.value: 3, ItemStatus.PASSED.value: 1}

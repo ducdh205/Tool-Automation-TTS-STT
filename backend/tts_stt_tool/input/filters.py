@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 
+from tts_stt_tool.compare.normalize import normalize
 from tts_stt_tool.models import InputItem
 
 REASON_SYSTEM = "Dòng hệ thống"
@@ -23,8 +25,13 @@ def strip_wake_word(text: str) -> str:
 
 
 def clean_text(text: str) -> str:
-    """Collapse whitespace (including line breaks inside a cell) and trim."""
-    return " ".join(text.split())
+    """NFC (TTS needs composed tones), collapse whitespace incl. line breaks, trim."""
+    return " ".join(unicodedata.normalize("NFC", text).split())
+
+
+def has_words(text: str) -> bool:
+    """True when the text still has something to say after scoring normalization."""
+    return bool(normalize(text))
 
 
 def classify(item: InputItem) -> tuple[str | None, str | None]:
@@ -39,6 +46,7 @@ def classify(item: InputItem) -> tuple[str | None, str | None]:
     if _UNREADABLE.search(text):
         return None, REASON_UNREADABLE
     spoken = clean_text(strip_wake_word(text))
-    if not spoken.strip(" ,.!?:;"):
-        return None, REASON_WAKE_ONLY
+    if not has_words(spoken):
+        # Nothing to say: either only the wake word, or only symbols/emoji ("-", "👍").
+        return None, REASON_WAKE_ONLY if spoken != text else REASON_UNREADABLE
     return spoken, None

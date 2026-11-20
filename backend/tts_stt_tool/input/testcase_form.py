@@ -9,6 +9,7 @@ from typing import Any
 
 import openpyxl
 from openpyxl.utils import column_index_from_string
+from openpyxl.utils.escape import unescape
 
 from tts_stt_tool.models import InputItem, SheetInfo
 
@@ -42,7 +43,8 @@ def cell_text(value: Any) -> str:
         return ""
     if isinstance(value, float) and value.is_integer():
         value = int(value)
-    return str(value).strip()
+    # Excel stores CR inside a cell as "_x000D_"; openpyxl leaves it escaped.
+    return unescape(str(value)).strip()
 
 
 @contextmanager
