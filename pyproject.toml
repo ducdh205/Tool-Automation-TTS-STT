@@ -4,11 +4,15 @@ version = "0.1.0"
 description = "Automation test TTS -> STT for Vietnamese voice assistant apps"
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    "fastapi>=0.165.0",
+    "httpx>=0.28.1",
     "jiwer>=4.0.0",
     "numpy>=2.5.5",
     "openpyxl>=3.1.5",
+    "python-multipart>=0.0.34",
     "soundfile>=0.14.0",
     "soxr>=1.1.0",
+    "uvicorn[standard]>=0.54.0",
     "vieneu>=3.8.5",
     "wyoming>=1.11.0",
 ]
