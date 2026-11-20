@@ -28,5 +28,6 @@ packages = ["backend/tts_stt_tool"]
 [tool.pytest.ini_options]
 testpaths = ["backend/tests"]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 markers = ["sample: uses public/DieuKhienXe_Pre.xlsx", "gpu: needs real TTS model", "live: needs running wyoming server"]
 addopts = "-m 'not gpu and not live'"
