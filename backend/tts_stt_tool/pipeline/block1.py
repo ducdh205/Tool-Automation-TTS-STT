@@ -20,19 +20,11 @@ from tts_stt_tool.jobs.runner import Emit, ProgressEvent
 from tts_stt_tool.store.db import ItemStatus, Store
 from tts_stt_tool.stt.wyoming_client import SttEngine, SttError
 from tts_stt_tool.tts.base import TtsEngine
-from tts_stt_tool.tts.cache import AudioCache, cache_key
+from tts_stt_tool.tts.cache import AudioCache
 
 _LOG = logging.getLogger(__name__)
 MAX_CONSECUTIVE_ERRORS = 3
 MISSING_AUDIO = "Không tìm thấy file audio — bấm Sinh lại"
-
-
-async def _audio_for(tts: TtsEngine, cache: AudioCache, text: str, voice: str, attempt: int) -> Path:
-    key = cache_key(text, voice, attempt, tts.version)
-    if cache.exists(key):
-        return cache.path_for(key)
-    audio, sr = await asyncio.to_thread(tts.synthesize, text, voice, attempt)
-    return await asyncio.to_thread(cache.write, key, audio, sr)
 
 
 def _still_queued(queue_query: Callable[[list[int]], list[dict[str, Any]]], item_id: int) -> dict[str, Any] | None:
@@ -69,7 +61,7 @@ async def run_generate(
         text = item["text_tts"]
         attempt = item["attempts"] if regenerate else 0
         try:
-            path = await _audio_for(tts, cache, text, voice, attempt)
+            path = await cache.get_or_synthesize(tts, text, voice, attempt)
             if not store.record_generated(item["id"], str(path), attempt + 1, text_tts=text):
                 _LOG.info("block1 item %s edited while synthesizing; audio dropped", item["id"])
         except Exception as e:  # per-item problem (TTS failure, bad text): mark and continue

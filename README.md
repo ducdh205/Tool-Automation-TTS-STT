@@ -72,8 +72,8 @@ Thanh trái có 2 bước. Nút **◐ / ☀ / ☾** ở chân thanh trái đổi
    **Dừng** bất cứ lúc nào — bấm lại sẽ làm tiếp các câu chưa xong.
 7. **Xuất Excel** (5 sheet: Tổng quan, Khối 1 – Verify, Audio không đạt, Không áp dụng, Lỗi) hoặc **CSV**.
 
-**Cài đặt** (thanh trái): giọng đọc (mặc định *Ngọc Huyền* – Nữ, Bắc), ngưỡng WER,
-ngưỡng cảnh báo tỉ lệ loại (10%), thời gian chờ STT.
+**Thanh thao tác Bước 1** có giọng VieNeu cho bộ audio mới, ngưỡng WER theo phần trăm và thời gian chờ STT tính theo giây.
+Ngưỡng cảnh báo tỉ lệ audio bị loại (mặc định 10%) nằm trong **Cài đặt** ở thanh trái.
 
 ## Khối 2 — test trên điện thoại
 

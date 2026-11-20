@@ -7,6 +7,7 @@ from backend.tests.helpers import FORM_SHEET, build_mini_form
 from backend.tests.pipeline.test_block1 import FakeTts
 from tts_stt_tool.api.app import create_app
 from tts_stt_tool.config import Settings
+from tts_stt_tool.tts.base import VoiceInfo
 
 
 class EchoStt:
@@ -68,6 +69,30 @@ def test_inspect_detects_form(client, tmp_path):
     assert info["is_form"] is True
     sheets = {s["name"]: s for s in info["sheets"]}
     assert sheets[FORM_SHEET]["item_count"] == 3
+
+
+def test_voice_preview_caches_a_wav_for_the_selected_preset(client, monkeypatch):
+    ctx = client.app.state.ctx
+    tts = ctx.tts
+    voice_id = "Quang Sơn"
+    monkeypatch.setattr(tts, "voices", lambda: [VoiceInfo(voice_id, "Quang Sơn — Nam · Trung · Tự nhiên")])
+    synthesize = tts.synthesize
+    voices_used = []
+
+    def record_voice(text, voice, attempt):
+        voices_used.append(voice)
+        return synthesize(text, voice, attempt)
+
+    monkeypatch.setattr(tts, "synthesize", record_voice)
+    assert client.get("/api/voices/preview", params={"voice_id": "Unknown"}).status_code == 404
+    first = client.get("/api/voices/preview", params={"voice_id": voice_id})
+    assert first.status_code == 200
+    assert first.headers["content-type"] == "audio/wav"
+    assert first.content.startswith(b"RIFF")
+    second = client.get("/api/voices/preview", params={"voice_id": voice_id})
+    assert second.content == first.content
+    assert voices_used == [voice_id]
+    assert client.get("/api/settings").json()["voice"] == "Ngọc Huyền"
 
 
 def test_inspect_csv_returns_columns(client, tmp_path):

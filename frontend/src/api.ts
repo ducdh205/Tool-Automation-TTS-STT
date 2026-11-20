@@ -107,6 +107,7 @@ export const api = {
   settings: () => req<Settings>("GET", "/api/settings"),
   saveSettings: (s: Settings) => req<Settings>("PUT", "/api/settings", s),
   voices: () => req<Voice[]>("GET", "/api/voices"),
+  voicePreviewUrl: (id: string) => `/api/voices/preview?voice_id=${encodeURIComponent(id)}`,
   health: () => req<Health>("GET", "/api/health"),
   profiles: () => req<AppProfile[]>("GET", "/api/profiles"),
   saveProfile: (p: AppProfile) => req<AppProfile>("PUT", `/api/profiles/${encodeURIComponent(p.name)}`, p),

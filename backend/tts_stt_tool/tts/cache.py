@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import os
 import unicodedata
@@ -9,6 +10,8 @@ from pathlib import Path
 
 import numpy as np
 import soundfile as sf
+
+from tts_stt_tool.tts.base import TtsEngine
 
 
 def cache_key(text_tts: str, voice: str, attempt: int, engine_version: str) -> str:
@@ -28,6 +31,13 @@ class AudioCache:
 
     def exists(self, key: str) -> bool:
         return self.path_for(key).is_file()
+
+    async def get_or_synthesize(self, tts: TtsEngine, text: str, voice: str, attempt: int) -> Path:
+        key = cache_key(text, voice, attempt, tts.version)
+        if self.exists(key):
+            return self.path_for(key)
+        audio, sr = await asyncio.to_thread(tts.synthesize, text, voice, attempt)
+        return await asyncio.to_thread(self.write, key, audio, sr)
 
     def write(self, key: str, audio: np.ndarray, sr: int) -> Path:
         final = self.path_for(key)

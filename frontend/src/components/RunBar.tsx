@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { STATUSES, type ItemStatus, type Job } from "../api";
 import { formatPct } from "../format";
 
@@ -18,6 +19,8 @@ interface Props {
   onStop: () => void;
   onReport: (format: "xlsx" | "csv") => void;
   rejectWarn: number;
+  settingsControls?: ReactNode;
+  settingsSaving?: boolean;
   selectedCount: number;
   onClearSelection: () => void;
 }
@@ -32,15 +35,16 @@ export function RunBar(p: Props) {
   const n = p.selectedCount;
   const scope = n ? String(n) : "tất cả";
   const busy = !!p.job;
+  const actionDisabled = busy || p.settingsSaving;
 
   return (
     <div className="runbar">
       {p.mode === "step1" && (
         <div className="toolbar">
-          <button className="btn" onClick={p.onImport} disabled={busy}>Nạp file</button>
-          <button className="btn primary" onClick={p.onGenerate} disabled={!p.hasSet || busy}>Sinh audio ({scope})</button>
-          <button className="btn primary" onClick={p.onVerify} disabled={!p.hasSet || busy}>Verify ({scope})</button>
-          <button className="btn" onClick={p.onRegenerate} disabled={!p.hasSet || busy}
+          <button className="btn" onClick={p.onImport} disabled={actionDisabled}>Nạp file</button>
+          <button className="btn primary" onClick={p.onGenerate} disabled={!p.hasSet || actionDisabled}>Sinh audio ({scope})</button>
+          <button className="btn primary" onClick={p.onVerify} disabled={!p.hasSet || actionDisabled}>Verify ({scope})</button>
+          <button className="btn" onClick={p.onRegenerate} disabled={!p.hasSet || actionDisabled}
             title="Sinh audio mới (seed khác) — sau đó bấm Verify lại">
             Sinh lại ({n ? n : "tất cả không đạt"})
           </button>
@@ -50,6 +54,7 @@ export function RunBar(p: Props) {
           <button className="btn ghost" onClick={() => p.onReport("csv")} disabled={!p.hasSet}>CSV</button>
         </div>
       )}
+      {p.mode === "step1" && p.settingsControls}
       {n > 0 && (
         <div className="small selection-line">
           Đang chọn {n} case · <button className="link-btn" onClick={p.onClearSelection}>Bỏ chọn</button>

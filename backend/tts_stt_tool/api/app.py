@@ -31,11 +31,13 @@ class AppContext:
     settings: Settings
     store: Store
     cache: AudioCache
+    voice_preview_cache: AudioCache
     runner: JobRunner
     tts: TtsEngine
     stt: SttEngine
     wyoming: WyomingServerManager | None
     voices: list[VoiceInfo] | None = None
+    voice_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     wyoming_error: str | None = None
     background: set = field(default_factory=set)
     adb: Adb = field(default_factory=Adb)
@@ -103,6 +105,7 @@ def create_app(
         settings=settings,
         store=Store(settings.data_dir / "tool.db"),
         cache=AudioCache(settings.data_dir / "audio"),
+        voice_preview_cache=AudioCache(settings.data_dir / "voice-previews"),
         runner=JobRunner(),
         tts=tts,
         stt=stt or WyomingStt(settings.wyoming_host, settings.wyoming_port, settings.stt_timeout_s),

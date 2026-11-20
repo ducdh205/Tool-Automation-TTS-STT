@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   api, ApiError, type AppProfile, type AppResult, type AppRun, type AudioSet, type DeviceStatus, type Health, type Item,
-  type ItemStatus, type Job, type ProgressEvent,
+  type ItemStatus, type Job, type ProgressEvent, type Settings,
 } from "./api";
 import { classifyEvent } from "./events";
 import { AppRunPanel } from "./components/AppRunPanel";
@@ -9,6 +9,7 @@ import { connectEvents } from "./ws";
 import { jobAfterStart, jobFromServer } from "./jobState";
 import { Sidebar, type Section } from "./components/Sidebar";
 import { RunBar } from "./components/RunBar";
+import { RunSettings } from "./components/RunSettings";
 import { ItemTable } from "./components/ItemTable";
 import { ImportDialog } from "./components/ImportDialog";
 import { SettingsPanel } from "./components/SettingsPanel";
@@ -38,7 +39,9 @@ export default function App() {
   const [search, setSearch] = useState("");
   const [dialog, setDialog] = useState<"import" | "settings" | "zip" | null>(null);
   const [toast, setToast] = useState<{ text: string; kind: "info" | "error" } | null>(null);
-  const [rejectWarn, setRejectWarn] = useState(0.1);
+  const [settings, setSettings] = useState<Settings | null>(null);
+  const [settingsLoadFailed, setSettingsLoadFailed] = useState(false);
+  const [settingsSaving, setSettingsSaving] = useState(false);
   const [deviceStatus, setDeviceStatus] = useState<DeviceStatus | null>(null);
   const devices = deviceStatus?.devices ?? [];
   const [profiles, setProfiles] = useState<AppProfile[]>([]);
@@ -81,6 +84,22 @@ export default function App() {
     setAppResults(new Map(rows.map((r) => [r.item_id, r])));
   }, []);
 
+  const loadSettings = useCallback(() => {
+    setSettingsLoadFailed(false);
+    api.settings().then(setSettings).catch(() => setSettingsLoadFailed(true));
+  }, []);
+
+  const saveSettings = async (changes: Partial<Settings>) => {
+    if (!settings) return;
+    setSettingsSaving(true);
+    try {
+      setSettings(await api.saveSettings({ ...settings, ...changes }));
+      notify("Đã lưu cài đặt.");
+    } finally {
+      setSettingsSaving(false);
+    }
+  };
+
   useEffect(() => {
     api.profiles().then(setProfiles).catch(() => {});
     const tick = () => api.device().then(setDeviceStatus).catch(() => setDeviceStatus(null));
@@ -102,14 +121,14 @@ export default function App() {
   useEffect(() => {
     loadSets().then((s) => { if (s[0]) setSetId(s[0].id); }).catch((e) => notify(e.message, "error"));
     api.currentJob().then(setJob).catch(() => {});
-    api.settings().then((s) => setRejectWarn(s.reject_warn_ratio)).catch(() => {});
+    loadSettings();
     const poll = () => api.health()
       .then((h) => { setHealth(h); setJob((j) => jobFromServer(j, h.job)); })
       .catch(() => setHealth(null));
     poll();
     const t = window.setInterval(poll, 5000);
     return () => window.clearInterval(t);
-  }, [loadSets]);
+  }, [loadSets, loadSettings]);
 
   useEffect(() => {
     setSel1(emptySelection);
@@ -296,7 +315,13 @@ export default function App() {
           onRegenerate={() => startBlock1("regenerate", selectedIds)}
           onStop={stop}
           onReport={report}
-          rejectWarn={rejectWarn}
+          rejectWarn={settings?.reject_warn_ratio ?? 0.1}
+          settingsSaving={settingsSaving}
+          settingsControls={settings ? (
+            <RunSettings settings={settings} busy={!!job} saving={settingsSaving} onSave={saveSettings} />
+          ) : settingsLoadFailed ? (
+            <div className="small">Chưa tải được cài đặt. <button className="link-btn" onClick={loadSettings}>Thử lại</button></div>
+          ) : <div className="muted small">Đang tải cài đặt…</div>}
         />
         {appMode && setId !== null && (
           <AppRunPanel
@@ -304,7 +329,7 @@ export default function App() {
             profiles={profiles}
             runs={appRuns}
             runId={appRunId}
-            busy={!!job}
+            busy={!!job || settingsSaving}
             passedCount={items.filter((i) => i.status === "Đạt").length}
             selectedCount={sel2.ids.size}
             onExportForm={exportForm}
@@ -314,10 +339,26 @@ export default function App() {
             onSelectRun={setAppRunId}
           />
         )}
+        {setId !== null && (
+          <aside className="scoring-guide" aria-label="Cách chấm WER và CER">
+            <ul>
+              <li><strong>WER</strong> đếm lỗi theo từ. <strong>CER</strong> đếm lỗi theo ký tự.</li>
+            </ul>
+            <p>
+              <strong>Cách chấm đạt</strong> · Có nội dung text và WER ≤ ngưỡng WER đặt trên thanh thao tác ở Bước 1.
+              Vượt ngưỡng hoặc kết quả rỗng thì chấm {appMode ? "Sai" : "Audio không đạt"}. CER chỉ để tham khảo.
+            </p>
+            <p><strong>Ví dụ</strong> với câu đọc “Bật quạt” ở ngưỡng 0%</p>
+            <ul>
+              <li>“bật quạt.” → Đạt (WER 0%, CER 0%).</li>
+              <li>“Tắt quạt” → Không đạt (WER 50%, CER 25%).</li>
+            </ul>
+          </aside>
+        )}
         {setId === null ? (
           <div className="empty">
             <p>Nạp file testcase (.xlsx / .csv) để bắt đầu.</p>
-            <button className="btn primary" onClick={() => setDialog("import")}>Nạp file</button>
+            <button className="btn primary" disabled={settingsSaving} onClick={() => setDialog("import")}>Nạp file</button>
           </div>
         ) : (
           <ItemTable
@@ -332,7 +373,7 @@ export default function App() {
               if (pos >= 0) setSelection((s) => clickRow(s, visibleSelectable, pos, shift));
             }}
             onToggleAll={() => setSelection((s) => toggleAllVisible(s, visibleSelectable))}
-            onRegenerate={appMode || job ? undefined : (id) => startBlock1("regenerate", [id])}
+            onRegenerate={appMode || job || settingsSaving ? undefined : (id) => startBlock1("regenerate", [id])}
           />
         )}
       </main>
@@ -357,10 +398,14 @@ export default function App() {
         />
       )}
       {dialog === "settings" && (
-        <SettingsPanel onClose={() => {
-          setDialog(null);
-          api.settings().then((s) => setRejectWarn(s.reject_warn_ratio)).catch(() => {});
-        }} />
+        <SettingsPanel
+          rejectWarn={settings?.reject_warn_ratio}
+          loadFailed={settingsLoadFailed}
+          saving={settingsSaving}
+          onRetry={loadSettings}
+          onSave={(value) => saveSettings({ reject_warn_ratio: value })}
+          onClose={() => setDialog(null)}
+        />
       )}
       {dialog === "zip" && currentRun && (
         <ExportZipDialog

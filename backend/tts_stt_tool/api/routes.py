@@ -31,9 +31,11 @@ from tts_stt_tool.report.form_export import build_form_report
 from tts_stt_tool.report.session_zip import build_session_zip, session_root_name
 from tts_stt_tool.store.db import ItemStatus
 from tts_stt_tool.stt.wyoming_client import WyomingStt
+from tts_stt_tool.tts.base import VoiceInfo
 
 router = APIRouter()
 XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+VOICE_PREVIEW_TEXT = "Xin chào, bạn muốn bật quạt hay điều chỉnh nhiệt độ?"
 
 
 def ctx_of(request: Request) -> AppContext:
@@ -299,12 +301,27 @@ def put_settings(request: Request, body: SettingsIn) -> dict[str, Any]:
     return ctx.settings.to_json()
 
 
+async def _available_voices(ctx: AppContext) -> list[VoiceInfo]:
+    if ctx.voices is None:
+        async with ctx.voice_lock:
+            if ctx.voices is None:
+                ctx.voices = await asyncio.to_thread(ctx.tts.voices)
+    return ctx.voices
+
+
 @router.get("/voices")
 async def voices(request: Request) -> list[dict[str, str]]:
+    return [v.__dict__ for v in await _available_voices(ctx_of(request))]
+
+
+@router.get("/voices/preview")
+async def voice_preview(request: Request, voice_id: str) -> FileResponse:
     ctx = ctx_of(request)
-    if ctx.voices is None:
-        ctx.voices = await asyncio.to_thread(ctx.tts.voices)
-    return [v.__dict__ for v in ctx.voices]
+    if not any(voice.id == voice_id for voice in await _available_voices(ctx)):
+        raise HTTPException(404, "Giọng VieNeu này không có sẵn")
+    async with ctx.voice_lock:
+        path = await ctx.voice_preview_cache.get_or_synthesize(ctx.tts, VOICE_PREVIEW_TEXT, voice_id, attempt=0)
+    return FileResponse(path, media_type="audio/wav")
 
 
 def _gpu_available() -> bool:
