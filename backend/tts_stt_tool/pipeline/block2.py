@@ -43,6 +43,10 @@ class DeviceDriver(Protocol):
         """Whether the microphone is recording right now; None if the device cannot tell."""
         ...
 
+    async def screencap(self) -> bytes:
+        """PNG of the current screen."""
+        ...
+
 
 class AdbDriver:
     """DeviceDriver over the stock adb binary."""
@@ -73,6 +77,20 @@ class AdbDriver:
         except Exception:  # dumpsys not permitted on some builds -> fall back to fixed delay
             return None
 
+    async def screencap(self) -> bytes:
+        return await self.adb.screencap(self.serial)
+
+
+async def _try_screencap(dev: DeviceDriver, log: list[str]) -> bytes | None:
+    """Evidence of a failure; a capture problem must never cost the sentence its result."""
+    try:
+        png = await dev.screencap()
+    except Exception as e:  # noqa: BLE001 — locked phone, adb hiccup, a driver without screencap
+        log.append(f"Không chụp được màn hình: {e or type(e).__name__}")
+        return None
+    log.append("Chụp màn hình")
+    return png
+
 
 @dataclass
 class AppCapture:
@@ -80,6 +98,7 @@ class AppCapture:
     error: str | None = None
     log: list[str] = field(default_factory=list)
     bubbles: list[str] = field(default_factory=list)  # user bubbles on screen at the end
+    screenshot: bytes | None = None  # PNG taken before closing the sheet when the text is wrong
 
 
 async def _wait_for(dev: DeviceDriver, label: str, timeout_s: float, sleep: Sleep) -> list[UiNode] | None:
@@ -163,17 +182,22 @@ async def run_one(
     player: AudioPlayer,
     sleep: Sleep = asyncio.sleep,
     prev_bubbles: list[str] | None = None,  # kept for callers; the baseline is now measured
+    is_correct: Callable[[str], bool] | None = None,
 ) -> AppCapture:
+    """Speak one sentence to the app and read what it heard.
+
+    With ``is_correct``, a wrong (or empty) result is photographed while the sheet still shows it.
+    """
     log: list[str] = []
     try:
-        return await _run_one(dev, p, wav, player, sleep, log)
+        return await _run_one(dev, p, wav, player, sleep, log, is_correct)
     except OperationError as e:
         e.log = log  # type: ignore[attr-defined]
         raise
 
 
 async def _run_one(dev: DeviceDriver, p: AppProfile, wav: Path, player: AudioPlayer, sleep: Sleep,
-                   log: list[str]) -> AppCapture:
+                   log: list[str], is_correct: Callable[[str], bool] | None = None) -> AppCapture:
     home = await ensure_home(dev, p, log, sleep)
     await _tap(dev, find(home, p.open_label), log)  # type: ignore[arg-type]
 
@@ -220,11 +244,14 @@ async def _run_one(dev: DeviceDriver, p: AppProfile, wav: Path, player: AudioPla
         log.append("App không trả câu nào")
 
     bubbles = bubble_labels(nodes, dev.screen_w)
+    shot = None
+    if is_correct is not None and not is_correct(text or ""):
+        shot = await _try_screencap(dev, log)  # before Back: afterwards the evidence is gone
     # Close with Back: the sheet grows when the assistant answers, so a tap at coordinates from a
     # ~2.5 s old dump can land on the "Thử nói" suggestion and open a task form.
     log.append("Back (đóng bảng)")
     await dev.back()
-    return AppCapture(text=text, log=log, bubbles=bubbles)
+    return AppCapture(text=text, log=log, bubbles=bubbles, screenshot=shot)
 
 
 MAX_CONSECUTIVE_OP_ERRORS = 5
@@ -240,7 +267,18 @@ async def run_block2(
     emit: Emit,
     cancel: asyncio.Event,
     run_one: Callable[..., Awaitable[AppCapture]] = run_one,
+    shots_dir: Path | None = None,
 ) -> None:
+    """Run every pending sentence; with ``shots_dir``, failures leave a ``<result id>.png`` there."""
+
+    def save_shot(result_id: int, png: bytes | None) -> str | None:
+        if png is None or shots_dir is None:
+            return None
+        shots_dir.mkdir(parents=True, exist_ok=True)
+        path = shots_dir / f"{result_id}.png"
+        path.write_bytes(png)
+        return str(path.resolve())
+
     todo = store.pending_for_block2(app_run_id)
     total = len(todo)
     op_errors = 0
@@ -253,12 +291,20 @@ async def run_block2(
         try:
             if not row["audio_path"] or not Path(row["audio_path"]).is_file():
                 raise OperationError("Không có file audio của câu này (chạy lại Khối 1)")
-            cap = await run_one(dev, profile, Path(row["audio_path"]), player)
+            if shots_dir is None:
+                cap = await run_one(dev, profile, Path(row["audio_path"]), player)
+            else:
+                text_tts = row["text_tts"]
+                cap = await run_one(dev, profile, Path(row["audio_path"]), player,
+                                    is_correct=lambda heard: compare(text_tts, heard, settings.wer_threshold).correct)
         except Exception as e:  # OperationError, adb failures: the tool, not the app, failed
             op_errors += 1
             msg = str(e) or type(e).__name__
-            store.record_app_result(row["id"], AppStatus.OP_ERROR, None, None, msg,
-                                    "\n".join(getattr(e, "log", []) or []))
+            log = list(getattr(e, "log", []) or [])
+            # Photograph the screen as the failure left it, before the next sentence recovers it.
+            png = await _try_screencap(dev, log) if shots_dir is not None else None
+            store.record_app_result(row["id"], AppStatus.OP_ERROR, None, None, msg, "\n".join(log),
+                                    screenshot_path=save_shot(row["id"], png))
             emit(ProgressEvent("", "log", done + 1, total, message=f"{label}: Lỗi thao tác — {msg}"))
             emit(ProgressEvent("", "item", done + 1, total, item=store.get_app_result(row["id"])))
             if op_errors >= MAX_CONSECUTIVE_OP_ERRORS:
@@ -270,7 +316,8 @@ async def run_block2(
         heard = cap.text or ""
         result = compare(row["text_tts"], heard, settings.wer_threshold)
         status = AppStatus.PASSED if result.correct else AppStatus.FAILED
-        store.record_app_result(row["id"], status, heard, result, None, "\n".join(cap.log))
+        store.record_app_result(row["id"], status, heard, result, None, "\n".join(cap.log),
+                                screenshot_path=save_shot(row["id"], cap.screenshot))
         for line in cap.log:
             emit(ProgressEvent("", "log", done, total, message=line))
         emit(ProgressEvent("", "item", done + 1, total, item=store.get_app_result(row["id"])))

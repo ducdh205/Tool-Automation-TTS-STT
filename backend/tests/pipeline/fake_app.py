@@ -43,6 +43,8 @@ class FakeApp:
         # Each dump takes ~2.5 s on the real phone, so "N dumps of silence" models that timeout.
         self.silence_dumps = silence_dumps
         self._silent = 0
+        self.shots: list[str] = []  # app state at each screencap
+        self.screencap_error: Exception | None = None
 
     # -- DeviceDriver ----------------------------------------------------------
     async def nodes(self) -> list[UiNode]:
@@ -114,6 +116,12 @@ class FakeApp:
         if self.state == "listening" and self.mic_checks >= self.mic_delay_checks:
             self._mic_live = True
         return self.state == "listening" and self._mic_live
+
+    async def screencap(self) -> bytes:
+        if self.screencap_error is not None:
+            raise self.screencap_error
+        self.shots.append(self.state)
+        return b"\x89PNG-fake"
 
     async def launch(self, package: str) -> None:
         self.launched += 1

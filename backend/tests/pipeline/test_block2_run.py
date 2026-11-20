@@ -1,4 +1,5 @@
 import asyncio
+from pathlib import Path
 
 import pytest
 
@@ -33,7 +34,7 @@ def scripted(answers):
     """run_one replacement: answers keyed by audio file name -> text | None | Exception."""
     seen_prev = []
 
-    async def fake(dev, profile, wav, player, prev_bubbles=None):
+    async def fake(dev, profile, wav, player, prev_bubbles=None, **_kw):
         seen_prev.append(prev_bubbles)
         ans = answers.get(wav.name, "")
         if isinstance(ans, Exception):
@@ -115,3 +116,43 @@ async def test_op_error_log_is_stored(env):
     row = by_text(store, run_id)[first["text_tts"]]
     assert row["status"] == AppStatus.OP_ERROR.value
     assert "Nói để tạo việc" in row["log"]
+
+
+async def test_failed_and_op_error_screenshots_saved(env, tmp_path):
+    store, run_id, settings = env
+    rows = store.app_results(run_id)
+    ok, wrong, broken = rows[0], rows[1], rows[2]
+    answers = {f"{ok['item_id']}.wav": ok["text_tts"], f"{wrong['item_id']}.wav": "sai bét",
+               f"{broken['item_id']}.wav": OperationError("Bảng không mở")}
+
+    async def fake(dev, profile, wav, player, prev_bubbles=None, is_correct=None):
+        ans = answers.get(wav.name, "")
+        if isinstance(ans, Exception):
+            raise ans
+        shot = None if is_correct(ans) else b"\x89PNG-fake"
+        return AppCapture(text=ans, log=[], screenshot=shot)
+
+    class Dev:
+        async def screencap(self):
+            return b"\x89PNG-op"
+
+    shots = tmp_path / "shots"
+    await run_block2(store, run_id, Dev(), AppProfile(), object(), settings, lambda e: None, asyncio.Event(),
+                     run_one=fake, shots_dir=shots)
+    got = {r["id"]: r for r in store.app_results(run_id)}
+    assert got[ok["id"]]["screenshot_path"] is None
+    assert Path(got[wrong["id"]]["screenshot_path"]).read_bytes() == b"\x89PNG-fake"
+    assert Path(got[broken["id"]]["screenshot_path"]) == shots / f"{broken['id']}.png"
+    assert Path(got[broken["id"]]["screenshot_path"]).read_bytes() == b"\x89PNG-op"
+    assert got[broken["id"]]["status"] == AppStatus.OP_ERROR.value
+
+
+async def test_op_error_screencap_failure_still_records(env, tmp_path):
+    store, run_id, settings = env
+    first = store.app_results(run_id)[0]
+    fake = scripted({f"{first['item_id']}.wav": OperationError("Mic không bật")})
+    await run_block2(store, run_id, object(), AppProfile(), object(), settings, lambda e: None, asyncio.Event(),
+                     run_one=fake, shots_dir=tmp_path / "shots")
+    row = store.get_app_result(first["id"])
+    assert row["status"] == AppStatus.OP_ERROR.value and row["screenshot_path"] is None
+    assert "Không chụp được màn hình" in row["log"]

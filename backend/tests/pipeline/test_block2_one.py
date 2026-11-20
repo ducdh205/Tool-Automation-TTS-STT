@@ -171,3 +171,32 @@ async def test_recovers_from_task_form_via_discard_dialog():
     assert "Bỏ" in app.taps
     assert app.launched == 0
     assert cap.text == "chỉnh nhiệt độ ghế lái lên 24 độ"
+
+
+async def test_wrong_text_screenshot_taken_while_sheet_open():
+    app = FakeApp(transcript="sai hoàn toàn")
+    cap = await run_one(app, AppProfile(), WAV, app, sleep=no_sleep, is_correct=lambda t: False)
+    assert cap.screenshot == b"\x89PNG-fake"
+    assert app.shots == ["idle"]  # captured on the open sheet, before the closing Back
+    assert app.state == "home"
+
+
+async def test_correct_text_no_screenshot():
+    app = FakeApp()
+    cap = await run_one(app, AppProfile(), WAV, app, sleep=no_sleep, is_correct=lambda t: True)
+    assert cap.screenshot is None and app.shots == []
+
+
+async def test_no_text_heard_counts_as_wrong():
+    app = FakeApp(transcript=None)
+    seen = []
+    cap = await run_one(app, AppProfile(), WAV, app, sleep=no_sleep, is_correct=lambda t: seen.append(t) or False)
+    assert seen == [""] and cap.screenshot is not None
+
+
+async def test_screencap_failure_keeps_result():
+    app = FakeApp(transcript="sai")
+    app.screencap_error = RuntimeError("adb")
+    cap = await run_one(app, AppProfile(), WAV, app, sleep=no_sleep, is_correct=lambda t: False)
+    assert cap.text == "sai" and cap.screenshot is None
+    assert any("Không chụp được màn hình" in line for line in cap.log)
