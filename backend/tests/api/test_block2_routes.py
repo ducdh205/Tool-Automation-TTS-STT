@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.tests.api.test_routes import EchoStt, create_set, wait_job_end
+from backend.tests.api.test_routes import EchoStt, create_set, verify_all, wait_job_end
 from backend.tests.pipeline.fake_app import FakeApp
 from backend.tests.pipeline.test_block2_one import no_sleep  # noqa: F401  (fake app helpers)
 from backend.tests.pipeline.test_block1 import FakeTts
@@ -40,8 +40,7 @@ def fast_profile(c):
 
 def verified_set(c, tmp_path):
     set_id = create_set(c, tmp_path)
-    c.post(f"/api/audio-sets/{set_id}/block1")
-    wait_job_end(c)
+    verify_all(c, set_id)
     return set_id
 
 
@@ -114,3 +113,31 @@ def test_manual_input_and_pin_blocked_while_job_uses_the_phone(ctx):
     assert c.get("/api/device").json()["busy"] == "SER"
     wait_job_end(c, timeout=30)
     assert c.get("/api/device").json()["busy"] is None
+
+
+def test_app_run_on_selected_items_saves_shots(ctx):
+    c, app, fake, tmp_path = ctx
+    name = fast_profile(c)
+    set_id = verified_set(c, tmp_path)
+    items = c.get(f"/api/audio-sets/{set_id}/items").json()
+    passed = [i["id"] for i in items if i["status"] == "Đạt"]
+    r = c.post(f"/api/audio-sets/{set_id}/app-runs", json={"serial": "SER", "profile": name, "item_ids": passed[:1]})
+    assert r.status_code == 200, r.text
+    run_id = r.json()["id"]
+    wait_job_end(c)
+    results = c.get(f"/api/app-runs/{run_id}/results").json()
+    assert [x["item_id"] for x in results] == passed[:1]
+    assert results[0]["status"] == "Sai"  # the fake app hears its own transcript
+    shot = Path(results[0]["screenshot_path"])
+    assert shot.is_file() and shot.parent == app.state.ctx.run_dir(run_id).resolve()
+
+
+def test_app_run_selection_without_passed_items_is_422(ctx):
+    c, _, _, tmp_path = ctx
+    name = fast_profile(c)
+    set_id = verified_set(c, tmp_path)
+    skipped = [i["id"] for i in c.get(f"/api/audio-sets/{set_id}/items").json() if i["status"] != "Đạt"]
+    runs_before = len(c.get(f"/api/audio-sets/{set_id}/app-runs").json())
+    r = c.post(f"/api/audio-sets/{set_id}/app-runs", json={"serial": "SER", "profile": name, "item_ids": skipped})
+    assert r.status_code == 422 and r.json()["detail"] == "Không có câu Đạt nào trong các case đã chọn"
+    assert len(c.get(f"/api/audio-sets/{set_id}/app-runs").json()) == runs_before

@@ -22,7 +22,7 @@ from tts_stt_tool.input.filters import clean_text, has_words
 from tts_stt_tool.input.generic import ColumnMapping, preview_columns, read_generic
 from tts_stt_tool.input.testcase_form import InputError, list_sheets, read_testcase_items
 from tts_stt_tool.jobs.runner import JobBusyError
-from tts_stt_tool.pipeline.block1 import run_block1
+from tts_stt_tool.pipeline.block1 import run_generate, run_verify
 from tts_stt_tool.pipeline.block2 import run_block2
 from tts_stt_tool.report.excel import build_block1_report, export_block1_csv
 from tts_stt_tool.store.db import ItemStatus
@@ -172,21 +172,61 @@ def item_audio(request: Request, item_id: int) -> FileResponse:
 
 
 # -- jobs ---------------------------------------------------------------------
-@router.post("/audio-sets/{set_id}/block1")
-async def start_block1(request: Request, set_id: int) -> dict[str, str]:
-    # async: runner.start needs the running event loop
+class ItemIdsIn(BaseModel):
+    item_ids: list[int] | None = None  # None = every eligible row
+
+
+def _start(ctx: AppContext, name: str, job) -> dict[str, str]:
+    try:
+        return {"job_id": ctx.runner.start(name, job)}
+    except JobBusyError as e:
+        raise HTTPException(409, str(e)) from e
+
+
+# async handlers: runner.start needs the running event loop
+@router.post("/audio-sets/{set_id}/generate")
+async def start_generate(request: Request, set_id: int, body: ItemIdsIn | None = None) -> dict[str, str]:
     ctx = ctx_of(request)
     _require_set(ctx, set_id)
+    ids = body.item_ids if body else None
+    if not ctx.store.items_for_generate(set_id, ids):
+        raise HTTPException(422, "Không có câu nào cần sinh audio")
+
+    async def job(emit, cancel) -> None:
+        await run_generate(ctx.store, set_id, ctx.tts, ctx.cache, ctx.settings, emit, cancel, item_ids=ids)
+
+    return _start(ctx, f"Sinh audio – bộ {set_id}", job)
+
+
+@router.post("/audio-sets/{set_id}/regenerate")
+async def start_regenerate(request: Request, set_id: int, body: ItemIdsIn | None = None) -> dict[str, str]:
+    ctx = ctx_of(request)
+    _require_set(ctx, set_id)
+    ids = body.item_ids if body else None
+    if not ctx.store.items_for_regenerate(set_id, ids):
+        raise HTTPException(422, "Không có câu nào để sinh lại")
+
+    async def job(emit, cancel) -> None:
+        await run_generate(ctx.store, set_id, ctx.tts, ctx.cache, ctx.settings, emit, cancel,
+                           item_ids=ids, regenerate=True)
+
+    return _start(ctx, f"Sinh lại – bộ {set_id}", job)
+
+
+@router.post("/audio-sets/{set_id}/verify")
+async def start_verify(request: Request, set_id: int, body: ItemIdsIn | None = None) -> dict[str, str]:
+    ctx = ctx_of(request)
+    _require_set(ctx, set_id)
+    ids = body.item_ids if body else None
+    if not ctx.store.items_for_verify(set_id, ids):
+        raise HTTPException(422, "Không có câu nào có audio để verify")
 
     async def job(emit, cancel) -> None:
         if ctx.wyoming is not None:
             await ctx.wyoming.ensure_running()
-        await run_block1(ctx.store, set_id, ctx.tts, ctx.cache, ctx.stt, ctx.settings, emit, cancel)
+        await run_verify(ctx.store, set_id, ctx.stt, ctx.settings, emit, cancel, item_ids=ids)
 
-    try:
-        return {"job_id": ctx.runner.start(f"Khối 1 – bộ {set_id}", job)}
-    except JobBusyError as e:
-        raise HTTPException(409, str(e)) from e
+    return _start(ctx, f"Verify – bộ {set_id}", job)
 
 
 @router.post("/jobs/{job_id}/cancel")
@@ -379,6 +419,7 @@ def put_profile(request: Request, name: str, body: ProfileIn) -> dict[str, Any]:
 class AppRunIn(BaseModel):
     serial: str = Field(min_length=1)
     profile: str
+    item_ids: list[int] | None = None  # None = every row that passed Block 1
 
 
 def _start_block2(ctx: AppContext, run_id: int, serial: str, profile: AppProfile) -> str:
@@ -386,7 +427,8 @@ def _start_block2(ctx: AppContext, run_id: int, serial: str, profile: AppProfile
         ctx.busy_serial = serial
         try:
             dev = await ctx.device(serial)
-            await run_block2(ctx.store, run_id, dev, profile, ctx.player, ctx.settings, emit, cancel)
+            await run_block2(ctx.store, run_id, dev, profile, ctx.player, ctx.settings, emit, cancel,
+                             shots_dir=ctx.run_dir(run_id))
         finally:
             ctx.busy_serial = None
 
@@ -419,7 +461,10 @@ async def create_app_run(request: Request, set_id: int, body: AppRunIn) -> dict[
             version = await ctx.adb.app_version(body.serial, profile.package)
         except AdbError:
             pass
-    run_id = ctx.store.create_app_run(set_id, body.serial, model, profile.name, version)
+    run_id = ctx.store.create_app_run(set_id, body.serial, model, profile.name, version, item_ids=body.item_ids)
+    if not ctx.store.app_results(run_id):
+        ctx.store.delete_app_run(run_id)
+        raise HTTPException(422, "Không có câu Đạt nào trong các case đã chọn")
     return {"id": run_id, "job_id": _start_block2(ctx, run_id, body.serial, profile)}
 
 

@@ -10,13 +10,13 @@ from tts_stt_tool.config import Settings
 
 
 class EchoStt:
-    """Reference STT that 'hears' exactly what was spoken last."""
+    """Reference STT that 'hears' exactly what the fake TTS put in the audio."""
 
     def __init__(self, tts):
         self.tts = tts
 
     async def transcribe(self, audio, sr):
-        return self.tts.calls[-1][0] if self.tts.calls else ""
+        return self.tts.text_of(audio)
 
 
 @pytest.fixture
@@ -49,6 +49,18 @@ def wait_job_end(client, timeout=10):
             return
         time.sleep(0.05)
     raise AssertionError("job did not finish")
+
+
+def verify_all(client, set_id):
+    """Generate then verify every row (what the old combined /block1 job did)."""
+    assert client.post(f"/api/audio-sets/{set_id}/generate").status_code == 200
+    wait_job_end(client)
+    assert client.post(f"/api/audio-sets/{set_id}/verify").status_code == 200
+    wait_job_end(client)
+
+
+def statuses(client, set_id):
+    return {i["id"]: i["status"] for i in client.get(f"/api/audio-sets/{set_id}/items").json()}
 
 
 def test_inspect_detects_form(client, tmp_path):
@@ -94,9 +106,7 @@ def test_patch_item_text(client, tmp_path):
 
 def test_block1_run_audio_and_report(client, tmp_path):
     set_id = create_set(client, tmp_path)
-    r = client.post(f"/api/audio-sets/{set_id}/block1")
-    assert r.status_code == 200
-    wait_job_end(client)
+    verify_all(client, set_id)
     summary = client.get(f"/api/audio-sets/{set_id}/summary").json()
     assert summary["Đạt"] == 2
     item = client.get(f"/api/audio-sets/{set_id}/items").json()[0]
@@ -111,7 +121,7 @@ def test_block1_run_audio_and_report(client, tmp_path):
     assert csv.headers["content-type"].startswith("text/csv")
 
 
-def test_second_block1_while_running_is_409(tmp_path):
+def test_second_job_while_running_is_409(tmp_path):
     class SlowStt:
         async def transcribe(self, audio, sr):
             import asyncio
@@ -121,9 +131,11 @@ def test_second_block1_while_running_is_409(tmp_path):
     app = create_app(Settings(data_dir=tmp_path), tts=FakeTts(), stt=SlowStt(), manage_wyoming=False)
     with TestClient(app) as c:
         set_id = create_set(c, tmp_path)
-        assert c.post(f"/api/audio-sets/{set_id}/block1").status_code == 200
-        r = c.post(f"/api/audio-sets/{set_id}/block1")
-        assert r.status_code == 409
+        assert c.post(f"/api/audio-sets/{set_id}/generate").status_code == 200
+        wait_job_end(c)
+        assert c.post(f"/api/audio-sets/{set_id}/verify").status_code == 200
+        assert c.post(f"/api/audio-sets/{set_id}/verify").status_code == 409
+        assert c.post(f"/api/audio-sets/{set_id}/regenerate", json={"item_ids": None}).status_code in (409, 422)
         job = c.get("/api/jobs/current").json()
         assert c.post(f"/api/jobs/{job['id']}/cancel").status_code == 200
         wait_job_end(c)
@@ -132,7 +144,7 @@ def test_second_block1_while_running_is_409(tmp_path):
 def test_websocket_receives_events(client, tmp_path):
     set_id = create_set(client, tmp_path)
     with client.websocket_connect("/ws") as ws:
-        client.post(f"/api/audio-sets/{set_id}/block1")
+        client.post(f"/api/audio-sets/{set_id}/generate")
         kinds = []
         while True:
             e = ws.receive_json()
@@ -155,7 +167,8 @@ def test_settings_roundtrip_and_health(client):
 
 def test_unknown_set_404(client):
     assert client.get("/api/audio-sets/999/items").status_code == 404
-    assert client.post("/api/audio-sets/999/block1").status_code == 404
+    for action in ("generate", "verify", "regenerate"):
+        assert client.post(f"/api/audio-sets/999/{action}").status_code == 404
 
 
 # --- final review fixes -------------------------------------------------------
@@ -194,8 +207,50 @@ def test_stt_timeout_applies_without_restart(tmp_path):
 def test_audio_not_cached_by_browser(client, tmp_path):
     """Review #8."""
     set_id = create_set(client, tmp_path)
-    client.post(f"/api/audio-sets/{set_id}/block1")
+    client.post(f"/api/audio-sets/{set_id}/generate")
     wait_job_end(client)
     item = client.get(f"/api/audio-sets/{set_id}/items").json()[0]
     r = client.get(f"/api/items/{item['id']}/audio")
     assert r.headers["cache-control"] == "no-store"
+
+
+# --- plan 3: separate jobs on selected rows ------------------------------------
+def test_generate_verify_regenerate_flow(client, tmp_path):
+    set_id = create_set(client, tmp_path)
+    r = client.post(f"/api/audio-sets/{set_id}/verify")
+    assert r.status_code == 422 and r.json()["detail"] == "Không có câu nào có audio để verify"
+    assert client.post(f"/api/audio-sets/{set_id}/regenerate").json()["detail"] == "Không có câu nào để sinh lại"
+    ids = [i["id"] for i in client.get(f"/api/audio-sets/{set_id}/items").json() if i["enabled"]]
+    assert client.post(f"/api/audio-sets/{set_id}/generate", json={"item_ids": ids[:1]}).status_code == 200
+    wait_job_end(client)
+    st = statuses(client, set_id)
+    assert st[ids[0]] == "Đã sinh audio" and st[ids[1]] == "Chờ"
+    assert client.post(f"/api/audio-sets/{set_id}/verify").status_code == 200
+    wait_job_end(client)
+    assert statuses(client, set_id)[ids[0]] == "Đạt"
+    assert client.post(f"/api/audio-sets/{set_id}/regenerate", json={"item_ids": [ids[0]]}).status_code == 200
+    wait_job_end(client)
+    item = next(i for i in client.get(f"/api/audio-sets/{set_id}/items").json() if i["id"] == ids[0])
+    assert item["status"] == "Đã sinh audio" and item["attempts"] == 2
+    assert client.post(f"/api/audio-sets/{set_id}/generate", json={"item_ids": [ids[0]]}).json()["detail"] \
+        == "Không có câu nào cần sinh audio"
+
+
+def test_block1_endpoint_removed(client, tmp_path):
+    set_id = create_set(client, tmp_path)
+    assert client.post(f"/api/audio-sets/{set_id}/block1").status_code in (404, 405)
+
+
+def test_verify_does_not_regenerate(tmp_path):
+    tts = FakeTts()
+
+    class WrongStt:
+        async def transcribe(self, audio, sr):
+            return "hoàn toàn khác"
+
+    app = create_app(Settings(data_dir=tmp_path), tts=tts, stt=WrongStt(), manage_wyoming=False)
+    with TestClient(app) as c:
+        set_id = create_set(c, tmp_path)
+        verify_all(c, set_id)
+        assert len(tts.calls) == 2
+        assert set(statuses(c, set_id).values()) >= {"Audio không đạt"}

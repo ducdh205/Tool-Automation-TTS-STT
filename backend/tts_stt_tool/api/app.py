@@ -62,6 +62,10 @@ class AppContext:
     def reports(self) -> Path:
         return self.settings.data_dir / "reports"
 
+    def run_dir(self, run_id: int) -> Path:
+        """Files produced while an app run executes (screenshots)."""
+        return self.settings.data_dir / "app_runs" / str(run_id)
+
 
 def _wyoming_manager(settings: Settings) -> WyomingServerManager:
     if settings.wyoming_cmd:

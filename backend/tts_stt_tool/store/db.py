@@ -299,6 +299,10 @@ class Store:
             c.execute(sql + " ORDER BY id", params)
             return run_id
 
+    def delete_app_run(self, run_id: int) -> None:
+        with self._conn() as c:
+            c.execute("DELETE FROM app_runs WHERE id=?", (run_id,))  # results cascade
+
     def get_app_run(self, run_id: int) -> dict[str, Any] | None:
         with self._conn() as c:
             r = c.execute("SELECT * FROM app_runs WHERE id=?", (run_id,)).fetchone()
