@@ -105,6 +105,10 @@ class Adb:
             last = xml.strip()[:200]
         raise AdbError(f"uiautomator dump lỗi sau {attempts} lần: {last}")
 
+    async def mic_active(self, serial: str) -> bool:
+        """~0.1 s, unlike a UI dump (~2.5 s): used to start playback the moment the app listens."""
+        return parse_mic_active((await self.run("-s", serial, "shell", "dumpsys", "audio")).decode("utf-8", "replace"))
+
     async def screen_size(self, serial: str) -> tuple[int, int]:
         return parse_wm_size((await self.run("-s", serial, "shell", "wm", "size")).decode("utf-8", "replace"))
 
@@ -128,6 +132,14 @@ class Adb:
     async def text(self, serial: str, text: str) -> None:
         """Type ASCII text (``input text`` cannot type Vietnamese diacritics)."""
         await self.run("-s", serial, "shell", "input", "text", escape_input_text(text))
+
+
+_MIC_ACTIVE = re.compile(r"riid \d+; active\? true")
+
+
+def parse_mic_active(dumpsys_audio: str) -> bool:
+    """True while some app records from the microphone (``dumpsys audio`` RecordActivityMonitor)."""
+    return bool(_MIC_ACTIVE.search(dumpsys_audio))
 
 
 def parse_wm_size(output: str) -> tuple[int, int]:

@@ -21,7 +21,11 @@ dependencies = [
 tts-stt-tool = "tts_stt_tool.cli:main"
 
 [dependency-groups]
-dev = ["pytest>=8", "pytest-asyncio>=0.24"]
+dev = [
+    "playwright>=1.65.2",
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+]
 
 [build-system]
 requires = ["hatchling"]

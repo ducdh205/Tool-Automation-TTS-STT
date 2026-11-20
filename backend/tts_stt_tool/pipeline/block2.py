@@ -20,6 +20,7 @@ from tts_stt_tool.store.db import AppStatus, Store
 
 _LOG = logging.getLogger(__name__)
 POLL_S = 0.4
+MIC_POLL_S = 0.15
 Sleep = Callable[[float], Awaitable[None]]
 
 
@@ -37,6 +38,10 @@ class DeviceDriver(Protocol):
     async def back(self) -> None: ...
 
     async def launch(self, package: str) -> None: ...
+
+    async def mic_active(self) -> bool | None:
+        """Whether the microphone is recording right now; None if the device cannot tell."""
+        ...
 
 
 class AdbDriver:
@@ -61,6 +66,12 @@ class AdbDriver:
 
     async def launch(self, package: str) -> None:
         await self.adb.launch(self.serial, package)
+
+    async def mic_active(self) -> bool | None:
+        try:
+            return await self.adb.mic_active(self.serial)
+        except Exception:  # dumpsys not permitted on some builds -> fall back to fixed delay
+            return None
 
 
 @dataclass
@@ -119,6 +130,24 @@ async def _poll(dev: DeviceDriver, timeout_s: float, sleep: Sleep):
         await sleep(POLL_S)
 
 
+async def _wait_mic(dev: DeviceDriver, p: AppProfile, log: list[str], sleep: Sleep) -> None:
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + p.listen_timeout_s
+    for n in range(max(1, int(p.listen_timeout_s / MIC_POLL_S))):
+        state = await dev.mic_active()
+        if state is None:
+            log.append("Không đọc được trạng thái mic, chờ cố định")
+            await sleep(1.0)
+            return
+        if state:
+            log.append(f"Mic đã bật (lần kiểm tra {n + 1})")
+            return
+        if loop.time() >= deadline:
+            break
+        await sleep(MIC_POLL_S)
+    raise OperationError(f"Mic không bật sau {p.listen_timeout_s:g}s (không thấy app thu âm)")
+
+
 async def run_one(
     dev: DeviceDriver,
     p: AppProfile,
@@ -132,8 +161,9 @@ async def run_one(
     home = await ensure_home(dev, p, log, sleep)
     await _tap(dev, find(home, p.open_label), log)  # type: ignore[arg-type]
 
-    # The app stops listening after ~3 s of silence and one dump costs ~2.5 s:
-    # play right away and check the sheet afterwards.
+    # The mic goes live 0.6-1+ s after the tap (audio before that is lost) and the app gives up
+    # after ~3 s of silence; a UI dump costs ~2.5 s, so watch the mic via dumpsys (~0.1 s).
+    await _wait_mic(dev, p, log, sleep)
     await sleep(p.pre_delay_s)
     log.append(f"Phát {Path(wav).name}")
     await asyncio.to_thread(player.play, wav)

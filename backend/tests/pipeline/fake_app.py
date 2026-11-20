@@ -21,7 +21,7 @@ class FakeApp:
     def __init__(self, transcript: str | None = "chỉnh nhiệt độ ghế lái lên 24 độ", *, state: str = "home",
                  auto_stop: bool = False, sheet_opens: bool = True, mic_visible: bool = True,
                  launch_fixes: bool = True, silence_dumps: int | None = None,
-                 keep_history: bool = False):
+                 keep_history: bool = False, mic_delay_checks: int = 0):
         self.transcript = transcript
         self.state = state
         self.auto_stop = auto_stop
@@ -29,6 +29,9 @@ class FakeApp:
         self.mic_visible = mic_visible
         self.launch_fixes = launch_fixes
         self.keep_history = keep_history
+        self.mic_delay_checks = mic_delay_checks  # mic goes live after N mic_active() checks
+        self.mic_checks = 0
+        self._mic_live = mic_delay_checks == 0
         self.bubbles: list[str] = []
         self.taps: list[str] = []
         self.launched = 0
@@ -64,6 +67,8 @@ class FakeApp:
         self.taps.append(label)
         if label == "Nói để tạo việc" and self.sheet_opens:
             self.state = "listening"
+            self.mic_checks = 0
+            self._mic_live = self.mic_delay_checks == 0
         elif label == "Dừng nghe":
             self._finish()
         elif label == "Bấm để nói":
@@ -79,6 +84,12 @@ class FakeApp:
             self.state = "home"
             self.bubbles = []
 
+    async def mic_active(self) -> bool | None:
+        self.mic_checks += 1
+        if self.state == "listening" and self.mic_checks >= self.mic_delay_checks:
+            self._mic_live = True
+        return self.state == "listening" and self._mic_live
+
     async def launch(self, package: str) -> None:
         self.launched += 1
         if self.launch_fixes:
@@ -87,8 +98,8 @@ class FakeApp:
 
     # -- fake speaker ----------------------------------------------------------
     def play(self, path: Path) -> None:
-        if self.state != "listening":
-            return  # nobody listening: audio is lost
+        if self.state != "listening" or not self._mic_live:
+            return  # nobody listening (or mic not live yet): audio is lost
         self.played.append(path)
         self._heard = True
         if self.auto_stop and self.state == "listening":

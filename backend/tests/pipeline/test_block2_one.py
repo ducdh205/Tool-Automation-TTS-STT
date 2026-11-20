@@ -64,7 +64,7 @@ async def test_mic_never_found():
 
 async def test_sheet_never_opens():
     app = FakeApp(sheet_opens=False)
-    with pytest.raises(OperationError, match="Dừng nghe"):
+    with pytest.raises(OperationError, match="Mic không bật"):
         await one(app)
 
 
@@ -111,3 +111,19 @@ async def test_history_kept_and_app_auto_stopped():
     second = await run_one(app, AppProfile(), WAV, app, sleep=no_sleep, prev_bubbles=first.bubbles)
     assert second.text == "bật đèn trần"
     assert second.bubbles == ["chỉnh nhiệt độ ghế lái lên 24 độ", "bật đèn trần"]
+
+
+async def test_waits_for_mic_before_playing():
+    """Real phone: the mic starts 0.6-1+ s after tapping; audio played earlier is lost."""
+    app = FakeApp(mic_delay_checks=3)
+    cap = await one(app)
+    assert app.played == [WAV]  # FakeApp drops audio played before the mic is live
+    assert cap.text == "chỉnh nhiệt độ ghế lái lên 24 độ"
+    assert app.mic_checks >= 3
+
+
+async def test_mic_never_starts():
+    app = FakeApp(mic_delay_checks=10**6)
+    with pytest.raises(OperationError, match="[Mm]ic"):
+        await one(app)
+    assert app.played == []

@@ -108,3 +108,15 @@ def test_new_bubble_by_labels_history_reset():
     from tts_stt_tool.device.ui_tree import new_bubble_after
     assert new_bubble_after(["a", "b"], [_bubble("c", 700)], 720).label == "c"
     assert new_bubble_after(["a", "b"], [], 720) is None
+
+
+def test_parse_mic_active():
+    from tts_stt_tool.device.adb import parse_mic_active
+
+    active = ("RecordActivityMonitor dump time: 14:41:14\n  riid 2799; active? true\n"
+              "  session:4009 -- source client=VOICE_RECOGNITION, dev=1ch 16000Hz\n")
+    idle = ("RecordActivityMonitor dump time: 14:41:13\nAudio event log: recording activity received by AudioService\n"
+            "11-20 14:09:00:945 rec stop riid:2199 uid:10211 session:3385 src:VOICE_RECOGNITION\n")
+    assert parse_mic_active(active) is True
+    assert parse_mic_active(idle) is False
+    assert parse_mic_active("  riid 12; active? false\n") is False

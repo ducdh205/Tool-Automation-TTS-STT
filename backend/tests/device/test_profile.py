@@ -11,7 +11,7 @@ def test_default_profile_values():
     assert p.package == "com.vita.suite.dev"
     assert (p.open_label, p.stop_label, p.idle_label, p.close_label) == (
         "Nói để tạo việc", "Dừng nghe", "Bấm để nói", "Đóng")
-    assert (p.pre_delay_s, p.post_delay_s) == (1.0, 1.0)
+    assert (p.pre_delay_s, p.post_delay_s) == (0.3, 1.0)
 
 
 def test_default_listed_when_empty(tmp_path):

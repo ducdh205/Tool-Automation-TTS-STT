@@ -20,7 +20,7 @@ class AppProfile:
     idle_label: str = "Bấm để nói"  # mic button when not listening
     close_label: str = "Đóng"  # closes the voice sheet
     sheet_label: str = "Tạo việc"
-    pre_delay_s: float = 1.0
+    pre_delay_s: float = 0.3  # after the mic is live
     post_delay_s: float = 1.0
     listen_timeout_s: float = 6.0
     result_timeout_s: float = 10.0
