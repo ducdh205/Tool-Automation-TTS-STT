@@ -13,18 +13,25 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 from tts_stt_tool.config import Settings
-from tts_stt_tool.store.db import ItemStatus, Store
+from tts_stt_tool.store.db import AppStatus, ItemStatus, Store
 
 SHEET_OVERVIEW = "Tổng quan"
 SHEET_VERIFY = "Khối 1 – Verify"
 SHEET_FAILED = "Audio không đạt"
 SHEET_SKIPPED = "Không áp dụng"
 SHEET_ERRORS = "Lỗi"
+SHEET_APP = "Khối 2 – App"
+SHEET_OP_ERRORS = "Lỗi thao tác"
 
 DETAIL_HEADERS = [
     "Sheet", "TC_ID", "Lượt", "Cụm tính năng", "Ưu tiên", "Câu gốc", "Câu đọc",
     "Text STT tham chiếu", "WER", "CER", "Từ sai", "Số lần sinh", "Trạng thái",
 ]
+APP_HEADERS = [
+    "Sheet", "TC_ID", "Lượt", "Cụm tính năng", "Ưu tiên", "Câu gốc", "Câu đọc",
+    "Text app", "WER", "CER", "Từ sai", "Kết quả",
+]
+OP_ERROR_HEADERS = ["Sheet", "TC_ID", "Lượt", "Câu đọc", "Lỗi", "Nhật ký thao tác"]
 SKIPPED_HEADERS = ["Sheet", "TC_ID", "Lượt", "Người nói", "Câu gốc", "Lý do"]
 ERROR_HEADERS = ["Sheet", "TC_ID", "Lượt", "Câu đọc", "Lỗi"]
 
@@ -146,10 +153,63 @@ def _overview(ws: Any, store: Store, audio_set_id: int, settings: Settings, item
         ws.column_dimensions[letter].width = 16
 
 
+def app_correct_ratio(summary: dict[str, int]) -> float:
+    ok = summary.get(AppStatus.PASSED.value, 0)
+    tested = ok + summary.get(AppStatus.FAILED.value, 0)
+    return ok / tested if tested else 0.0
+
+
+def _app_overview(ws: Any, store: Store, run_id: int, results: list[dict]) -> None:
+    run = store.get_app_run(run_id) or {}
+    summary = store.app_summary(run_id)
+    tested = [r for r in results if r["status"] in (AppStatus.PASSED.value, AppStatus.FAILED.value)]
+    avg = lambda key: sum(r[key] or 0 for r in tested) / len(tested) if tested else 0  # noqa: E731
+    row = ws.max_row + 2
+    ws.cell(row=row, column=1, value="KHỐI 2 – APP").font = Font(bold=True, size=13)
+    device = f"{run.get('device_model') or 'Android'} ({run.get('serial')})"
+    pairs: list[tuple[str, Any, str | None]] = [
+        ("Lần test", run_id, None), ("Thiết bị", device, None), ("Hồ sơ app", run.get("profile_name"), None),
+        ("Phiên bản app", run.get("app_version") or "—", None), ("Thời gian", run.get("created_at"), None),
+        ("Số câu test", len(results), None),
+    ]
+    pairs += [(st.value, summary.get(st.value, 0), None) for st in AppStatus]
+    pairs += [("Tỉ lệ đúng của app", app_correct_ratio(summary), PCT),
+              ("WER app trung bình", avg("wer"), PCT), ("CER app trung bình", avg("cer"), PCT)]
+    for label, value, fmt in pairs:
+        row += 1
+        ws.cell(row=row, column=1, value=label).font = BOLD
+        cell = ws.cell(row=row, column=2, value=value)
+        if fmt:
+            cell.number_format = fmt
+    row += 2
+    headers = ["Theo sheet (app)", "Số câu", "Đúng", "Sai", "Lỗi thao tác", "Tỉ lệ đúng"]
+    for col, h in enumerate(headers, start=1):
+        c = ws.cell(row=row, column=col, value=h)
+        c.font = BOLD
+        c.fill = HEADER_FILL
+    per: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    for r in results:
+        per[r["sheet"]][r["status"]] += 1
+        per[r["sheet"]]["_n"] += 1
+    for sheet, counts in per.items():
+        row += 1
+        values = [sheet, counts["_n"], counts[AppStatus.PASSED.value], counts[AppStatus.FAILED.value],
+                  counts[AppStatus.OP_ERROR.value], app_correct_ratio(counts)]
+        for col, v in enumerate(values, start=1):
+            c = ws.cell(row=row, column=col, value=v)
+            if col == 6:
+                c.number_format = PCT
+
+
+def _app_row(r: dict[str, Any]) -> list[Any]:
+    return [r["sheet"], r["tc_id"], r["turn"], r["feature"], r["priority"], r["text_raw"], r["text_tts"],
+            r["app_text"], r["wer"], r["cer"], format_ops(r["ops"]), r["status"]]
+
+
 def build_block1_report(
     store: Store, audio_set_id: int, settings: Settings, out_path: Path, app_run_id: int | None = None
 ) -> Path:
-    """Write the Block 1 workbook. ``app_run_id`` is reserved for Block 2 (plan 2)."""
+    """Write the workbook; with ``app_run_id`` it also contains that Block 2 run."""
     items = store.get_items(audio_set_id)
     wb = Workbook()
     _overview(wb.active, store, audio_set_id, settings, items)
@@ -165,6 +225,14 @@ def build_block1_report(
     errors = [i for i in items if i["status"] == ItemStatus.ERROR.value]
     _table(wb.create_sheet(SHEET_ERRORS), ERROR_HEADERS,
            [[i["sheet"], i["tc_id"], i["turn"], i["text_tts"], i["error"]] for i in errors])
+    if app_run_id is not None:
+        results = store.app_results(app_run_id)
+        _app_overview(wb[SHEET_OVERVIEW], store, app_run_id, results)
+        tested = [r for r in results if r["status"] != AppStatus.OP_ERROR.value]
+        _table(wb.create_sheet(SHEET_APP), APP_HEADERS, [_app_row(r) for r in tested], ("WER", "CER"))
+        ops = [r for r in results if r["status"] == AppStatus.OP_ERROR.value]
+        _table(wb.create_sheet(SHEET_OP_ERRORS), OP_ERROR_HEADERS,
+               [[r["sheet"], r["tc_id"], r["turn"], r["text_tts"], r["error"], r["log"]] for r in ops])
     for ws in wb.worksheets[1:]:
         for row in ws.iter_rows(min_row=2):
             for cell in row:

@@ -197,7 +197,9 @@ def current_job(request: Request) -> dict[str, Any] | None:
 
 # -- reports ------------------------------------------------------------------
 @router.post("/audio-sets/{set_id}/report")
-async def report(request: Request, set_id: int, format: Literal["xlsx", "csv"] = "xlsx") -> FileResponse:
+async def report(
+    request: Request, set_id: int, format: Literal["xlsx", "csv"] = "xlsx", app_run_id: int | None = None
+) -> FileResponse:
     ctx = ctx_of(request)
     s = _require_set(ctx, set_id)
     stamp = datetime.now().strftime("%Y%m%d-%H%M")
@@ -205,7 +207,12 @@ async def report(request: Request, set_id: int, format: Literal["xlsx", "csv"] =
     if format == "csv":
         out = await asyncio.to_thread(export_block1_csv, ctx.store, set_id, ctx.reports / f"{base}.csv")
         return FileResponse(out, media_type="text/csv; charset=utf-8", filename=out.name)
-    out = await asyncio.to_thread(build_block1_report, ctx.store, set_id, ctx.settings, ctx.reports / f"{base}.xlsx")
+    if app_run_id is not None:
+        run = ctx.store.get_app_run(app_run_id)
+        if run is None or run["audio_set_id"] != set_id:
+            raise HTTPException(404, "Lần test app không thuộc bộ audio này")
+    out = await asyncio.to_thread(build_block1_report, ctx.store, set_id, ctx.settings, ctx.reports / f"{base}.xlsx",
+                                  app_run_id)
     return FileResponse(out, media_type=XLSX_TYPE, filename=out.name)
 
 
