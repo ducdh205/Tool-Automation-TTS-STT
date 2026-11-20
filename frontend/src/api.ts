@@ -58,6 +58,13 @@ export interface AppResult {
 }
 export interface UiNodeInfo { label: string; cls: string; bounds: number[]; clickable: boolean }
 
+/** A non-2xx answer; `status` 422 means "nothing to do / invalid choice", not a failure. */
+export class ApiError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+  }
+}
+
 async function req<T>(method: string, url: string, body?: unknown): Promise<T> {
   const init: RequestInit = { method };
   if (body instanceof FormData) init.body = body;
@@ -69,7 +76,7 @@ async function req<T>(method: string, url: string, body?: unknown): Promise<T> {
   if (!r.ok) {
     let msg = `${r.status}`;
     try { msg = (await r.json()).detail ?? msg; } catch { /* not json */ }
-    throw new Error(msg);
+    throw new ApiError(msg, r.status);
   }
   return r.json() as Promise<T>;
 }
@@ -89,7 +96,12 @@ export const api = {
   items: (setId: number) => req<Item[]>("GET", `/api/audio-sets/${setId}/items`),
   patchItem: (id: number, patch: { text_tts?: string; enabled?: boolean }) =>
     req<Item>("PATCH", `/api/items/${id}`, patch),
-  startBlock1: (setId: number) => req<{ job_id: string }>("POST", `/api/audio-sets/${setId}/block1`),
+  generate: (setId: number, itemIds: number[] | null) =>
+    req<{ job_id: string }>("POST", `/api/audio-sets/${setId}/generate`, { item_ids: itemIds }),
+  verify: (setId: number, itemIds: number[] | null) =>
+    req<{ job_id: string }>("POST", `/api/audio-sets/${setId}/verify`, { item_ids: itemIds }),
+  regenerate: (setId: number, itemIds: number[] | null) =>
+    req<{ job_id: string }>("POST", `/api/audio-sets/${setId}/regenerate`, { item_ids: itemIds }),
   cancelJob: (jobId: string) => req<{ ok: boolean }>("POST", `/api/jobs/${jobId}/cancel`),
   currentJob: () => req<Job | null>("GET", "/api/jobs/current"),
   settings: () => req<Settings>("GET", "/api/settings"),
@@ -106,18 +118,32 @@ export const api = {
   nodeAt: (serial: string, x: number, y: number) =>
     req<UiNodeInfo>("GET", `/api/device/${encodeURIComponent(serial)}/node-at?x=${x}&y=${y}`),
   audioUrl: (itemId: number, version = "") => `/api/items/${itemId}/audio${version ? `?v=${version}` : ""}`,
-  async downloadReport(setId: number, format: "xlsx" | "csv", appRunId?: number | null) {
+  downloadReport(setId: number, format: "xlsx" | "csv", appRunId?: number | null) {
     const q = appRunId ? `&app_run_id=${appRunId}` : "";
-    const r = await fetch(`/api/audio-sets/${setId}/report?format=${format}${q}`, { method: "POST" });
-    if (!r.ok) throw new Error(`Xuất báo cáo lỗi (${r.status})`);
-    const cd = r.headers.get("content-disposition") ?? "";
-    const m = /filename\*=utf-8''([^;]+)|filename="?([^";]+)"?/i.exec(cd);
-    const name = m ? decodeURIComponent(m[1] ?? m[2]) : `bao-cao.${format}`;
-    const url = URL.createObjectURL(await r.blob());
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = name;
-    a.click();
-    URL.revokeObjectURL(url);
+    return downloadFile(`/api/audio-sets/${setId}/report?format=${format}${q}`, undefined, `bao-cao.${format}`);
   },
 };
+
+/** POST, then save the response as a file named by the server (Content-Disposition). */
+export async function downloadFile(url: string, body: unknown, fallbackName: string): Promise<void> {
+  const init: RequestInit = { method: "POST" };
+  if (body !== undefined) {
+    init.body = JSON.stringify(body);
+    init.headers = { "Content-Type": "application/json" };
+  }
+  const r = await fetch(url, init);
+  if (!r.ok) {
+    let msg = `Xuất file lỗi (${r.status})`;
+    try { msg = (await r.json()).detail ?? msg; } catch { /* not json */ }
+    throw new ApiError(msg, r.status);
+  }
+  const cd = r.headers.get("content-disposition") ?? "";
+  const m = /filename\*=utf-8''([^;]+)|filename="?([^";]+)"?/i.exec(cd);
+  const name = m ? decodeURIComponent(m[1] ?? m[2]) : fallbackName;
+  const href = URL.createObjectURL(await r.blob());
+  const a = document.createElement("a");
+  a.href = href;
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(href);
+}

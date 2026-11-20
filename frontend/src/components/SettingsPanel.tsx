@@ -44,9 +44,6 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
               </select>
               <small className="muted">Áp dụng cho bộ audio tạo mới.</small>
             </label>
-            <label>Số lần sinh lại tối đa
-              <input type="number" min={0} max={10} value={s.max_regen} onChange={num("max_regen")} />
-            </label>
             <label>Ngưỡng WER để Đạt
               <input type="number" min={0} max={1} step={0.05} value={s.wer_threshold} onChange={num("wer_threshold")} />
               <small className="muted">0 = phải khớp hoàn toàn sau chuẩn hóa.</small>

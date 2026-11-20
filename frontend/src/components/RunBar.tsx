@@ -2,6 +2,8 @@ import { STATUSES, type ItemStatus, type Job } from "../api";
 import { formatPct } from "../format";
 
 interface Props {
+  /** Step 1 shows the Block 1 actions; step 2 only filters and progress (its actions live in AppRunPanel). */
+  mode: "step1" | "step2";
   hasSet: boolean;
   job: Job | null;
   summary: Record<string, number>;
@@ -10,10 +12,14 @@ interface Props {
   onFilter: (f: ItemStatus | "all") => void;
   onSearch: (s: string) => void;
   onImport: () => void;
-  onRun: () => void;
+  onGenerate: () => void;
+  onVerify: () => void;
+  onRegenerate: () => void;
   onStop: () => void;
   onReport: (format: "xlsx" | "csv") => void;
   rejectWarn: number;
+  selectedCount: number;
+  onClearSelection: () => void;
 }
 
 export function RunBar(p: Props) {
@@ -23,17 +29,32 @@ export function RunBar(p: Props) {
   const reject = verified ? failed / verified : 0;
   const total = Object.values(p.summary).reduce((a, b) => a + b, 0);
   const pct = p.job && p.job.total ? (p.job.done / p.job.total) * 100 : 0;
+  const n = p.selectedCount;
+  const scope = n ? String(n) : "tất cả";
+  const busy = !!p.job;
 
   return (
     <div className="runbar">
-      <div className="toolbar">
-        <button className="btn" onClick={p.onImport} disabled={!!p.job}>Nạp file</button>
-        <button className="btn primary" onClick={p.onRun} disabled={!p.hasSet || !!p.job}>Sinh audio + Verify</button>
-        <button className="btn danger" onClick={p.onStop} disabled={!p.job}>Dừng</button>
-        <span className="spacer" />
-        <button className="btn" onClick={() => p.onReport("xlsx")} disabled={!p.hasSet}>Xuất Excel</button>
-        <button className="btn ghost" onClick={() => p.onReport("csv")} disabled={!p.hasSet}>CSV</button>
-      </div>
+      {p.mode === "step1" && (
+        <div className="toolbar">
+          <button className="btn" onClick={p.onImport} disabled={busy}>Nạp file</button>
+          <button className="btn primary" onClick={p.onGenerate} disabled={!p.hasSet || busy}>Sinh audio ({scope})</button>
+          <button className="btn primary" onClick={p.onVerify} disabled={!p.hasSet || busy}>Verify ({scope})</button>
+          <button className="btn" onClick={p.onRegenerate} disabled={!p.hasSet || busy}
+            title="Sinh audio mới (seed khác) — sau đó bấm Verify lại">
+            Sinh lại ({n ? n : "tất cả không đạt"})
+          </button>
+          <button className="btn danger" onClick={p.onStop} disabled={!busy}>Dừng</button>
+          <span className="spacer" />
+          <button className="btn" onClick={() => p.onReport("xlsx")} disabled={!p.hasSet}>Xuất Excel</button>
+          <button className="btn ghost" onClick={() => p.onReport("csv")} disabled={!p.hasSet}>CSV</button>
+        </div>
+      )}
+      {n > 0 && (
+        <div className="small selection-line">
+          Đang chọn {n} case · <button className="link-btn" onClick={p.onClearSelection}>Bỏ chọn</button>
+        </div>
+      )}
       <div className="filters">
         <div className="chips">
           <button className={`chip ${p.filter === "all" ? "active" : ""}`} onClick={() => p.onFilter("all")}>

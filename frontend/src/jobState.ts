@@ -1,6 +1,6 @@
 import type { Job } from "./api";
 
-/** Job to track after POST /block1 returns — null if its terminal event already arrived (fast job). */
+/** Job to track after a job-starting POST returns — null if its terminal event already arrived (fast job). */
 export function jobAfterStart(jobId: string, finished: Set<string>): Job | null {
   return finished.has(jobId) ? null : { id: jobId, name: "Khối 1", done: 0, total: 0 };
 }

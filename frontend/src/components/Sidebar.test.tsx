@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { adbStatus, Sidebar } from "./Sidebar";
 
 describe("adbStatus", () => {
@@ -31,9 +31,30 @@ describe("adbStatus", () => {
 
 describe("Sidebar ADB line", () => {
   it("renders the device name in the footer", () => {
-    render(<Sidebar section="data" onSection={() => {}} health={null} sets={[]} currentSetId={null}
+    render(<Sidebar section="step1" step2Ready onSection={() => {}} health={null} sets={[]} currentSetId={null}
       onSelectSet={() => {}} onSettings={() => {}}
       device={{ adb: true, error: null, devices: [{ serial: "S1", state: "device", model: "Pixel 7" }] }} />);
     expect(screen.getByText("ADB · Pixel 7")).toBeTruthy();
+  });
+});
+
+describe("Sidebar steps", () => {
+  const base = { onSection: () => {}, health: null, sets: [], currentSetId: null, onSelectSet: () => {}, onSettings: () => {} };
+
+  it("has two steps; step 2 is disabled until a row passed", () => {
+    render(<Sidebar {...base} section="step1" step2Ready={false} />);
+    expect(screen.getByText("Bước 1 — Audio")).toBeTruthy();
+    const step2 = screen.getByText("Bước 2 — Test app").closest("button")!;
+    expect(step2.disabled).toBe(true);
+    expect(step2.title).toBe("Cần ít nhất một câu Đạt ở Bước 1");
+    expect(screen.queryByText("Báo cáo")).toBeNull();
+  });
+
+  it("switches step and offers the theme switch", () => {
+    const onSection = vi.fn();
+    render(<Sidebar {...base} onSection={onSection} section="step1" step2Ready />);
+    fireEvent.click(screen.getByText("Bước 2 — Test app"));
+    expect(onSection).toHaveBeenCalledWith("step2");
+    expect(screen.getByTitle("Đổi giao diện sáng / tối")).toBeTruthy();
   });
 });

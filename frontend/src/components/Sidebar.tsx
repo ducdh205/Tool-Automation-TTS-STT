@@ -1,10 +1,13 @@
 import type { AudioSet, DeviceStatus, Health } from "../api";
+import { ThemeSwitch } from "./ThemeSwitch";
 
-export type Section = "data" | "block1" | "app" | "report";
+export type Section = "step1" | "step2";
 
 interface Props {
   section: Section;
   onSection: (s: Section) => void;
+  /** Step 2 needs at least one row that passed Block 1. */
+  step2Ready: boolean;
   health: Health | null;
   sets: AudioSet[];
   currentSetId: number | null;
@@ -14,12 +17,11 @@ interface Props {
   device?: DeviceStatus | null;
 }
 
-const NAV: { id: Section; label: string; hint: string; disabled?: boolean }[] = [
-  { id: "data", label: "Dữ liệu", hint: "Nạp file, chọn sheet" },
-  { id: "block1", label: "Sinh audio & Verify", hint: "Khối 1" },
-  { id: "app", label: "Test app", hint: "Khối 2 · điện thoại" },
-  { id: "report", label: "Báo cáo", hint: "Xuất Excel / CSV" },
+const NAV: { id: Section; label: string; hint: string }[] = [
+  { id: "step1", label: "Bước 1 — Audio", hint: "Nạp file · Sinh audio · Verify" },
+  { id: "step2", label: "Bước 2 — Test app", hint: "Chạy trên điện thoại · Xuất phiên" },
 ];
+const STEP2_LOCKED = "Cần ít nhất một câu Đạt ở Bước 1";
 
 type Level = "ok" | "warn" | "bad" | "off";
 
@@ -49,22 +51,28 @@ export function adbStatus(s: DeviceStatus | null): { level: Level; label: string
   };
 }
 
-export function Sidebar({ section, onSection, health, sets, currentSetId, onSelectSet, onSettings, device = null }: Props) {
+export function Sidebar({
+  section, onSection, step2Ready, health, sets, currentSetId, onSelectSet, onSettings, device = null,
+}: Props) {
   return (
     <aside className="sidebar">
       <div className="brand">TTS → STT<small>Automation test</small></div>
       <nav>
-        {NAV.map((n) => (
+        {NAV.map((n) => {
+          const locked = n.id === "step2" && !step2Ready;
+          return (
           <button
             key={n.id}
             className={`nav-item ${section === n.id ? "active" : ""}`}
-            disabled={n.disabled}
+            disabled={locked}
+            title={locked ? STEP2_LOCKED : undefined}
             onClick={() => onSection(n.id)}
           >
             <span>{n.label}</span>
             <small>{n.hint}</small>
           </button>
-        ))}
+          );
+        })}
       </nav>
 
       <div className="side-block">
@@ -89,6 +97,7 @@ export function Sidebar({ section, onSection, health, sets, currentSetId, onSele
         <Dot ok={!!health?.wyoming} label="STT tham chiếu (wyoming)" title={health?.wyoming_error ?? undefined} />
         <Dot ok={!!health?.gpu} label={health?.gpu ? "GPU" : "TTS chạy CPU"} />
         <Dot {...adbStatus(device)} />
+        <ThemeSwitch />
         <button className="nav-item small-btn" onClick={onSettings}>Cài đặt</button>
       </div>
     </aside>

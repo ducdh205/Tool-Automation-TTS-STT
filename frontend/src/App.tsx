@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  api, type AppProfile, type AppResult, type AppRun, type AudioSet, type DeviceStatus, type Health, type Item,
+  api, ApiError, type AppProfile, type AppResult, type AppRun, type AudioSet, type DeviceStatus, type Health, type Item,
   type ItemStatus, type Job, type ProgressEvent,
 } from "./api";
 import { classifyEvent } from "./events";
@@ -13,6 +13,7 @@ import { ItemTable } from "./components/ItemTable";
 import { ImportDialog } from "./components/ImportDialog";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { DevicePanel } from "./components/DevicePanel";
+import { clickRow, emptySelection, prune, toggleAllVisible, type Selection } from "./selection";
 
 function countByStatus(items: Item[]): Record<string, number> {
   const out: Record<string, number> = {};
@@ -20,8 +21,13 @@ function countByStatus(items: Item[]): Record<string, number> {
   return out;
 }
 
+const step1Selectable = (it: Item) => !!it.enabled && !!it.text_tts;
+const step2Selectable = (it: Item) => it.status === "Đạt";
+
 export default function App() {
-  const [section, setSection] = useState<Section>("data");
+  const [section, setSection] = useState<Section>("step1");
+  const [sel1, setSel1] = useState<Selection>(emptySelection);
+  const [sel2, setSel2] = useState<Selection>(emptySelection);
   const [health, setHealth] = useState<Health | null>(null);
   const [sets, setSets] = useState<AudioSet[]>([]);
   const [setId, setSetId] = useState<number | null>(null);
@@ -49,6 +55,9 @@ export default function App() {
     setToast({ text, kind });
     window.setTimeout(() => setToast(null), 6000);
   };
+  // 422 = "nothing to do" (e.g. Verify with no generated audio): information, not a failure.
+  const notifyError = (e: unknown) =>
+    notify((e as Error).message, e instanceof ApiError && e.status === 422 ? "info" : "error");
 
   const loadSets = useCallback(async () => {
     const s = await api.sets();
@@ -102,9 +111,22 @@ export default function App() {
   }, [loadSets]);
 
   useEffect(() => {
+    setSel1(emptySelection);
+    setSel2(emptySelection);
     if (setId !== null) loadItems(setId).catch((e) => notify(e.message, "error"));
     else setItems([]);
   }, [setId, loadItems]);
+
+  // Rows can stop being selectable (edited, disabled, failed verify): drop them from the selection.
+  useEffect(() => {
+    setSel1((s) => prune(s, new Set(items.filter(step1Selectable).map((i) => i.id))));
+    setSel2((s) => prune(s, new Set(items.filter(step2Selectable).map((i) => i.id))));
+  }, [items]);
+
+  const step2Ready = items.some(step2Selectable);
+  useEffect(() => {
+    if (section === "step2" && !step2Ready && items.length > 0) setSection("step1");
+  }, [section, step2Ready, items.length]);
 
   useEffect(() => connectEvents((e: ProgressEvent) => {
     const kind = classifyEvent(e);
@@ -141,7 +163,7 @@ export default function App() {
     if (up) api.currentJob().then((cur) => setJob((j) => jobFromServer(j, cur))).catch(() => {});
   }), [loadItems, loadSets, loadAppRuns, loadAppResults]);
 
-  const appMode = section === "app";
+  const appMode = section === "step2";
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
     return items.filter((it) =>
@@ -150,6 +172,11 @@ export default function App() {
       (!q || it.text_raw.toLowerCase().includes(q) || it.tc_id.toLowerCase().includes(q) ||
         (it.text_tts ?? "").toLowerCase().includes(q)));
   }, [items, filter, search, appMode]);
+  const selection = appMode ? sel2 : sel1;
+  const setSelection = appMode ? setSel2 : setSel1;
+  const isSelectable = appMode ? step2Selectable : step1Selectable;
+  const visibleSelectable = visible.filter(isSelectable).map((i) => i.id);
+  const selectedIds = selection.ids.size ? [...selection.ids] : null;
 
   const startApp = async (serial: string, profile: string) => {
     if (setId === null) return;
@@ -159,7 +186,7 @@ export default function App() {
       setJob(jobAfterStart(r.job_id, finishedJobs.current));
       await loadAppRuns(setId, r.id);
     } catch (e) {
-      notify((e as Error).message, "error");
+      notifyError(e);
     }
   };
 
@@ -181,14 +208,13 @@ export default function App() {
     }
   };
 
-  const run = async () => {
+  const startBlock1 = async (action: "generate" | "verify" | "regenerate", ids: number[] | null) => {
     if (setId === null) return;
     try {
-      const r = await api.startBlock1(setId);
+      const r = await api[action](setId, ids);
       setJob(jobAfterStart(r.job_id, finishedJobs.current));
-      setSection("block1");
     } catch (e) {
-      notify((e as Error).message, "error");
+      notifyError(e);
     }
   };
 
@@ -199,7 +225,7 @@ export default function App() {
   const report = async (format: "xlsx" | "csv") => {
     if (setId === null) return;
     try {
-      await api.downloadReport(setId, format, section === "app" ? appRunId : null);
+      await api.downloadReport(setId, format, appMode ? appRunId : null);
     } catch (e) {
       notify((e as Error).message, "error");
     }
@@ -208,14 +234,13 @@ export default function App() {
   const current = sets.find((s) => s.id === setId);
 
   return (
-    <div className="layout">
+    <div className={`layout ${appMode ? "" : "no-device"}`}>
       <Sidebar
         section={section}
+        step2Ready={step2Ready}
         onSection={(s) => {
           setSection(s);
-          if (s === "data") setDialog("import");
-          if (s === "report") report("xlsx");
-          if (s === "app") setFilter("all");
+          setFilter("all");
         }}
         health={health}
         sets={sets}
@@ -234,6 +259,9 @@ export default function App() {
           )}
         </div>
         <RunBar
+          mode={appMode ? "step2" : "step1"}
+          selectedCount={selection.ids.size}
+          onClearSelection={() => setSelection(emptySelection)}
           hasSet={setId !== null}
           job={job}
           summary={countByStatus(items)}
@@ -242,7 +270,9 @@ export default function App() {
           onFilter={setFilter}
           onSearch={setSearch}
           onImport={() => setDialog("import")}
-          onRun={run}
+          onGenerate={() => startBlock1("generate", selectedIds)}
+          onVerify={() => startBlock1("verify", selectedIds)}
+          onRegenerate={() => startBlock1("regenerate", selectedIds)}
           onStop={stop}
           onReport={report}
           rejectWarn={rejectWarn}
@@ -266,14 +296,29 @@ export default function App() {
             <button className="btn primary" onClick={() => setDialog("import")}>Nạp file</button>
           </div>
         ) : (
-          <ItemTable items={visible} onPatch={patch} app={appMode && appRunId !== null ? appResults : undefined} />
+          <ItemTable
+            items={visible}
+            onPatch={patch}
+            app={appMode && appRunId !== null ? appResults : undefined}
+            selected={selection.ids}
+            isSelectable={isSelectable}
+            onRowSelect={(index, shift) => {
+              const id = visible[index]?.id;
+              const pos = visibleSelectable.indexOf(id);
+              if (pos >= 0) setSelection((s) => clickRow(s, visibleSelectable, pos, shift));
+            }}
+            onToggleAll={() => setSelection((s) => toggleAllVisible(s, visibleSelectable))}
+            onRegenerate={appMode || job ? undefined : (id) => startBlock1("regenerate", [id])}
+          />
         )}
       </main>
-      <DevicePanel
-        jobLogs={jobLogs}
-        profile={profiles[0] ?? null}
-        onProfileSaved={(p) => { setProfiles((ps) => ps.map((x) => (x.name === p.name ? p : x))); notify(`Đã lưu hồ sơ ${p.name}`); }}
-      />
+      {appMode && (
+        <DevicePanel
+          jobLogs={jobLogs}
+          profile={profiles[0] ?? null}
+          onProfileSaved={(p) => { setProfiles((ps) => ps.map((x) => (x.name === p.name ? p : x))); notify(`Đã lưu hồ sơ ${p.name}`); }}
+        />
+      )}
 
       {dialog === "import" && (
         <ImportDialog
