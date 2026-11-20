@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { api, type Item } from "../api";
+import { api, type AppResult, type Item } from "../api";
 import { formatPct, renderOps } from "../format";
 
 const ROW_H = 34;
@@ -8,12 +8,29 @@ const ROW_H = 34;
 interface Props {
   items: Item[];
   onPatch: (id: number, patch: { text_tts?: string; enabled?: boolean }) => void;
+  /** Block 2: results of the selected app run, keyed by item id. Switches the STT columns to the app's. */
+  app?: Map<number, AppResult>;
 }
 
 const STATUS_CLASS: Record<string, string> = {
   "Chờ": "st-pending", "Không áp dụng": "st-skip", "Đã sinh audio": "st-gen",
   "Đạt": "st-pass", "Audio không đạt": "st-fail", "Lỗi": "st-error",
+  "Đúng": "st-pass", "Sai": "st-fail", "Lỗi thao tác": "st-error",
 };
+
+function AppText({ r }: { r: AppResult | undefined }) {
+  if (!r) return <span className="muted">—</span>;
+  if (r.status === "Lỗi thao tác") return <span className="muted" title={r.log ?? ""}>{r.error}</span>;
+  if (r.status === "Chờ") return <span className="muted">chưa test</span>;
+  if (!r.ops.length) return <span>{r.app_text || <i className="muted">(app không trả câu)</i>}</span>;
+  return (
+    <span>
+      {renderOps(r.ops).map((s, i) => (
+        <span key={i}><span className={`op-${s.kind}`} title={s.title}>{s.text}</span>{" "}</span>
+      ))}
+    </span>
+  );
+}
 
 function SttText({ item }: { item: Item }) {
   if (item.error && item.status === "Lỗi") return <span className="muted" title={item.error}>{item.error}</span>;
@@ -65,7 +82,7 @@ function PlayButton({ item }: { item: Item }) {
   return <button className="icon-btn" title="Nghe audio" onClick={play}>▶</button>;
 }
 
-export function ItemTable({ items, onPatch }: Props) {
+export function ItemTable({ items, onPatch, app }: Props) {
   const parentRef = useRef<HTMLDivElement>(null);
   const v = useVirtualizer({
     count: items.length,
@@ -79,13 +96,14 @@ export function ItemTable({ items, onPatch }: Props) {
     <div className="table">
       <div className="row head">
         <span /><span>#</span><span>Sheet</span><span>TC_ID</span><span>Lượt</span>
-        <span>Câu gốc</span><span>Câu đọc</span><span /><span>Text STT tham chiếu</span>
+        <span>Câu gốc</span><span>Câu đọc</span><span /><span>{app ? "Text app" : "Text STT tham chiếu"}</span>
         <span className="num">WER</span><span className="num">CER</span><span>Trạng thái</span>
       </div>
       <div ref={parentRef} className="table-body">
         <div style={{ height: v.getTotalSize(), position: "relative" }}>
           {v.getVirtualItems().map((vr) => {
             const it = items[vr.index];
+            const ar = app?.get(it.id);
             return (
               <div
                 key={it.id}
@@ -109,13 +127,19 @@ export function ItemTable({ items, onPatch }: Props) {
                 <span className="ellipsis" title={it.text_raw}>{it.text_raw}</span>
                 <span className="ellipsis cell-tts"><EditableText item={it} onSave={(t) => onPatch(it.id, { text_tts: t })} /></span>
                 <span><PlayButton item={it} /></span>
-                <span className="ellipsis"><SttText item={it} /></span>
-                <span className="num">{formatPct(it.wer)}</span>
-                <span className="num">{formatPct(it.cer)}</span>
+                <span className="ellipsis">{app ? <AppText r={ar} /> : <SttText item={it} />}</span>
+                <span className="num">{formatPct(app ? ar?.wer : it.wer)}</span>
+                <span className="num">{formatPct(app ? ar?.cer : it.cer)}</span>
                 <span>
-                  <span className={`badge ${STATUS_CLASS[it.status] ?? ""}`} title={it.skip_reason ?? it.error ?? it.status}>
-                    {it.status}{it.attempts > 1 ? ` ·${it.attempts}x` : ""}
-                  </span>
+                  {app ? (
+                    <span className={`badge ${STATUS_CLASS[ar?.status ?? ""] ?? ""}`} title={ar?.error ?? ar?.status ?? ""}>
+                      {ar?.status ?? "—"}
+                    </span>
+                  ) : (
+                    <span className={`badge ${STATUS_CLASS[it.status] ?? ""}`} title={it.skip_reason ?? it.error ?? it.status}>
+                      {it.status}{it.attempts > 1 ? ` ·${it.attempts}x` : ""}
+                    </span>
+                  )}
                 </span>
               </div>
             );

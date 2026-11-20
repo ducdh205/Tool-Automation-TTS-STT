@@ -15,7 +15,7 @@ interface Props {
 const NAV: { id: Section; label: string; hint: string; disabled?: boolean }[] = [
   { id: "data", label: "Dữ liệu", hint: "Nạp file, chọn sheet" },
   { id: "block1", label: "Sinh audio & Verify", hint: "Khối 1" },
-  { id: "app", label: "Test app", hint: "Khối 2 · sắp có", disabled: true },
+  { id: "app", label: "Test app", hint: "Khối 2 · điện thoại" },
   { id: "report", label: "Báo cáo", hint: "Xuất Excel / CSV" },
 ];
 
@@ -67,8 +67,8 @@ export function Sidebar({ section, onSection, health, sets, currentSetId, onSele
       <div className="side-footer">
         <Dot ok={!!health?.wyoming} label="STT tham chiếu (wyoming)" title={health?.wyoming_error ?? undefined} />
         <Dot ok={!!health?.gpu} label={health?.gpu ? "GPU" : "TTS chạy CPU"} />
-        <div className="status-line muted"><span className="dot off" />Thiết bị: chưa kết nối</div>
-        <button className="nav-item small-btn" disabled title="Kế hoạch 2">Hồ sơ app</button>
+
+        
         <button className="nav-item small-btn" onClick={onSettings}>Cài đặt</button>
       </div>
     </aside>

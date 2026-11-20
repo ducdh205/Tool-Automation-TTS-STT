@@ -69,3 +69,19 @@ describe("audio playback (review #8)", () => {
     expect(srcs[0]).toBe("/api/items/1/audio?v=a1b2c3d4e5f60718.wav");
   });
 });
+
+describe("app mode (block 2)", () => {
+  it("shows the app's text, WER and verdict instead of the reference STT", () => {
+    const item = makeItem(0, { status: "Đạt", ref_text: "mua sữa", wer: 0, cer: 0 });
+    const app = new Map([[1, {
+      id: 50, app_run_id: 7, item_id: 1, status: "Sai" as const, app_text: "mua sửa", wer: 0.5, cer: 0.1,
+      ops: [{ op: "equal" as const, ref: "mua", hyp: "mua" }, { op: "sub" as const, ref: "sữa", hyp: "sửa" }],
+      error: null, log: null,
+    }]]);
+    const { container } = render(<ItemTable items={[item]} onPatch={() => {}} app={app} />);
+    expect(screen.getByText("Text app")).toBeTruthy();
+    expect(container.querySelector(".op-sub")?.textContent).toBe("sửa");
+    expect(screen.getByText("50%")).toBeTruthy();
+    expect(screen.getByText("Sai")).toBeTruthy();
+  });
+});

@@ -38,9 +38,25 @@ export type DeviceInputBody =
 export interface DeviceStatus { adb: boolean; error: string | null; devices: DeviceInfo[] }
 
 export interface ProgressEvent {
-  job_id: string; kind: "item" | "progress" | "done" | "error" | "cancelled";
-  done: number; total: number; item: Item | null; message: string | null;
+  job_id: string; kind: "item" | "progress" | "log" | "done" | "error" | "cancelled";
+  done: number; total: number; item: Item | AppResult | null; message: string | null;
 }
+
+export interface AppProfile {
+  name: string; package: string; open_label: string; stop_label: string; idle_label: string;
+  close_label: string; sheet_label: string; pre_delay_s: number; post_delay_s: number;
+  listen_timeout_s: number; result_timeout_s: number;
+}
+export type AppStatus = "Chờ" | "Đúng" | "Sai" | "Lỗi thao tác";
+export interface AppRun {
+  id: number; audio_set_id: number; serial: string; device_model: string | null; profile_name: string;
+  app_version: string | null; created_at: string; summary: Record<string, number>;
+}
+export interface AppResult {
+  id: number; app_run_id: number; item_id: number; status: AppStatus; app_text: string | null;
+  wer: number | null; cer: number | null; ops: WordOp[]; error: string | null; log: string | null;
+}
+export interface UiNodeInfo { label: string; cls: string; bounds: number[]; clickable: boolean }
 
 async function req<T>(method: string, url: string, body?: unknown): Promise<T> {
   const init: RequestInit = { method };
@@ -80,9 +96,19 @@ export const api = {
   saveSettings: (s: Settings) => req<Settings>("PUT", "/api/settings", s),
   voices: () => req<Voice[]>("GET", "/api/voices"),
   health: () => req<Health>("GET", "/api/health"),
+  profiles: () => req<AppProfile[]>("GET", "/api/profiles"),
+  saveProfile: (p: AppProfile) => req<AppProfile>("PUT", `/api/profiles/${encodeURIComponent(p.name)}`, p),
+  appRuns: (setId: number) => req<AppRun[]>("GET", `/api/audio-sets/${setId}/app-runs`),
+  appResults: (runId: number) => req<AppResult[]>("GET", `/api/app-runs/${runId}/results`),
+  startAppRun: (setId: number, serial: string, profile: string) =>
+    req<{ id: number; job_id: string }>("POST", `/api/audio-sets/${setId}/app-runs`, { serial, profile }),
+  resumeAppRun: (runId: number) => req<{ job_id: string }>("POST", `/api/app-runs/${runId}/resume`),
+  nodeAt: (serial: string, x: number, y: number) =>
+    req<UiNodeInfo>("GET", `/api/device/${encodeURIComponent(serial)}/node-at?x=${x}&y=${y}`),
   audioUrl: (itemId: number, version = "") => `/api/items/${itemId}/audio${version ? `?v=${version}` : ""}`,
-  async downloadReport(setId: number, format: "xlsx" | "csv") {
-    const r = await fetch(`/api/audio-sets/${setId}/report?format=${format}`, { method: "POST" });
+  async downloadReport(setId: number, format: "xlsx" | "csv", appRunId?: number | null) {
+    const q = appRunId ? `&app_run_id=${appRunId}` : "";
+    const r = await fetch(`/api/audio-sets/${setId}/report?format=${format}${q}`, { method: "POST" });
     if (!r.ok) throw new Error(`Xuất báo cáo lỗi (${r.status})`);
     const cd = r.headers.get("content-disposition") ?? "";
     const m = /filename\*=utf-8''([^;]+)|filename="?([^";]+)"?/i.exec(cd);

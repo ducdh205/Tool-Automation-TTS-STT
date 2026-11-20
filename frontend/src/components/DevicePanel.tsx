@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { api, type DeviceInfo, type DeviceInputBody, type DeviceKey, type DeviceStatus } from "../api";
+import { api, type AppProfile, type DeviceInfo, type DeviceInputBody, type DeviceKey, type DeviceStatus, type UiNodeInfo } from "../api";
 
 const STATE_LABEL: Record<string, string> = {
   device: "Đã kết nối",
@@ -127,8 +127,26 @@ function Empty({ title, hint }: { title: string; hint: string }) {
   );
 }
 
-export function DevicePanel() {
+const ROLES: { key: keyof AppProfile; label: string }[] = [
+  { key: "open_label", label: "Mở mic" },
+  { key: "stop_label", label: "Dừng nghe" },
+  { key: "idle_label", label: "Mic chờ" },
+  { key: "close_label", label: "Đóng" },
+];
+
+interface Props {
+  /** Lines from the running Block 2 job (newest last). */
+  jobLogs?: string[];
+  /** Profile that pin mode assigns labels to. */
+  profile?: AppProfile | null;
+  onProfileSaved?: (p: AppProfile) => void;
+}
+
+export function DevicePanel({ jobLogs = [], profile = null, onProfileSaved }: Props) {
   const status = useDeviceStatus();
+  const [pinning, setPinning] = useState(false);
+  const [pinned, setPinned] = useState<UiNodeInfo | null>(null);
+  const [pinError, setPinError] = useState<string | null>(null);
   const [picked, setPicked] = useState<string | null>(null);
   const [log, setLog] = useState<string[]>([]);
   const [text, setText] = useState("");
@@ -138,6 +156,17 @@ export function DevicePanel() {
   const online = current?.state === "device";
   const send = async (b: DeviceInputBody) => {
     if (!current) return;
+    if (pinning && b.action === "tap") {
+      // Pin mode: look up the control under the finger instead of tapping the phone.
+      setPinError(null);
+      try {
+        setPinned(await api.nodeAt(current.serial, b.x, b.y));
+      } catch (e) {
+        setPinned(null);
+        setPinError(e instanceof Error ? e.message : String(e));
+      }
+      return;
+    }
     const label =
       b.action === "tap" ? `Chạm (${b.x}, ${b.y})`
       : b.action === "swipe" ? `Vuốt (${b.x}, ${b.y}) → (${b.x2}, ${b.y2})`
@@ -152,6 +181,18 @@ export function DevicePanel() {
     }
   };
   const key = (k: DeviceKey) => send({ action: "key", key: k });
+
+  const firstLine = (l: string) => l.split(/\r?\n/)[0];
+  const assign = async (k: keyof AppProfile) => {
+    if (!profile || !pinned?.label) return;
+    try {
+      const saved = await api.saveProfile({ ...profile, [k]: firstLine(pinned.label) });
+      onProfileSaved?.(saved);
+      setPinned(null);
+    } catch (e) {
+      setPinError(e instanceof Error ? e.message : String(e));
+    }
+  };
 
   let screen;
   if (!status) screen = <Empty title="Đang kiểm tra thiết bị…" hint="" />;
@@ -183,6 +224,27 @@ export function DevicePanel() {
         <div className="phone-screen">{screen}</div>
       </div>
       {online && (
+        <div className="pin-bar">
+          <button className={`btn small-btn ${pinning ? "primary" : ""}`} disabled={!profile}
+            onClick={() => { setPinning(!pinning); setPinned(null); setPinError(null); }}
+            title="Bật rồi chạm lên màn hình để xem nhãn nút và gán cho hồ sơ app">
+            {pinning ? "Đang ghim — chạm lên nút trên màn hình" : "Ghim nút cho hồ sơ app"}
+          </button>
+          {pinning && pinned && (
+            <div className="pin-result">
+              <div className="small"><b>{firstLine(pinned.label) || "(không có nhãn)"}</b> <span className="muted">{pinned.cls.split(".").pop()}</span></div>
+              <div className="chips">
+                {ROLES.map((r) => (
+                  <button key={r.key} className="chip" disabled={!pinned.label} onClick={() => assign(r.key)}
+                    title={`Hiện tại: ${String(profile?.[r.key] ?? "")}`}>{r.label}</button>
+                ))}
+              </div>
+            </div>
+          )}
+          {pinning && pinError && <div className="small error">{pinError}</div>}
+        </div>
+      )}
+      {online && (
         <div className="device-controls">
           <div className="device-keys">
             <button className="btn" title="Quay lại" onClick={() => key("back")}>◁</button>
@@ -208,6 +270,11 @@ export function DevicePanel() {
       <div className="device-log">
         <div className="side-title">Nhật ký thao tác</div>
         {status?.error && <div className="muted small">{status.error}</div>}
+        {jobLogs.length > 0 && (
+          <div className="device-log-list small log-lines">
+            {[...jobLogs].reverse().map((l, i) => <div key={`j${i}`}>{l}</div>)}
+          </div>
+        )}
         {log.length === 0 ? (
           <div className="muted small">{online ? "Bấm lên màn hình để chạm, kéo để vuốt." : "—"}</div>
         ) : (

@@ -161,3 +161,13 @@ nav { display: flex; flex-direction: column; gap: 2px; }
 .error { background: var(--bad-soft); color: var(--bad); padding: 8px 10px; border-radius: 6px; }
 .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--panel); padding: 10px 16px; border-radius: 8px; z-index: 20; box-shadow: 0 6px 20px rgba(0,0,0,.25); max-width: 70vw; }
 .toast.error { background: var(--bad); color: #fff; }
+
+/* block 2 */
+.apprun { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+.inline { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.inline select { border: 1px solid var(--border); border-radius: 6px; padding: 4px 6px; background: var(--panel-2); color: var(--text); max-width: 220px; }
+.accent { color: var(--accent); }
+.phone-img.pinning { cursor: crosshair; outline: 2px solid var(--accent); }
+.pin-bar { display: flex; flex-direction: column; gap: 6px; }
+.pin-result { border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; display: flex; flex-direction: column; gap: 4px; }
+.log-lines { overflow: auto; flex: 1; min-height: 0; font-family: Consolas, monospace; font-size: 11px; line-height: 1.5; }
