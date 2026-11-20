@@ -113,7 +113,7 @@ export function ItemTable({
   });
 
   return (
-    <div className="table">
+    <div className={`table ${app ? "app" : ""}`}>
       <div className="row head">
         <span>
           <HeadCheckbox
@@ -125,7 +125,7 @@ export function ItemTable({
         </span>
         <span>#</span><span>Sheet</span><span>TC_ID</span><span>Lượt</span>
         <span>Câu gốc</span><span>Câu đọc</span><span /><span>{app ? "Text app" : "Text STT tham chiếu"}</span>
-        <span className="num">WER</span><span className="num">CER</span><span>Trạng thái</span><span />
+        <span className="num">WER</span><span className="num">CER</span><span>Trạng thái</span>{!app && <span />}
       </div>
       <div ref={parentRef} className="table-body">
         <div style={{ height: v.getTotalSize(), position: "relative" }}>
@@ -170,11 +170,11 @@ export function ItemTable({
                     </span>
                   )}
                 </span>
-                <span className="row-actions">
-                  {onRegenerate && it.audio_path && (
-                    <button className="icon-btn" title="Sinh lại audio" onClick={() => onRegenerate(it.id)}>⟳</button>
-                  )}
-                  {!app && (
+                {!app && (
+                  <span className="row-actions">
+                    {onRegenerate && it.audio_path && (
+                      <button className="icon-btn" title="Sinh lại audio" onClick={() => onRegenerate(it.id)}>⟳</button>
+                    )}
                     <button
                       className={`icon-btn ${it.enabled ? "" : "off"}`}
                       title={it.text_tts ? "Bật/tắt câu này" : "Sửa câu đọc để bật lại"}
@@ -183,8 +183,8 @@ export function ItemTable({
                     >
                       ⏻
                     </button>
-                  )}
-                </span>
+                  </span>
+                )}
               </div>
             );
           })}

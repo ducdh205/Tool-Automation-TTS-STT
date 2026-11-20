@@ -126,6 +126,15 @@ describe("app mode (block 2)", () => {
   });
 });
 
+describe("app mode layout", () => {
+  it("has no actions column, so the status column keeps its width", () => {
+    const { container } = render(<ItemTable items={[makeItem(0, { status: "Đạt" })]} onPatch={() => {}} app={new Map()} />);
+    expect(container.querySelector(".table")?.classList.contains("app")).toBe(true);
+    expect(container.querySelector(".row-actions")).toBeNull();
+    expect(container.querySelector(".row.head")?.children.length).toBe(12);
+  });
+});
+
 describe("app mode is read-only (review2 #6)", () => {
   it("does not open the editor on double click", () => {
     const item = makeItem(0, { status: "Đạt" });
