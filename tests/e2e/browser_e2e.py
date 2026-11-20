@@ -5,7 +5,8 @@ app on its home screen, PC speakers on. Run:
 
     uv run python tests/e2e/browser_e2e.py [--items 5] [--sheet "ONOFFTemperature Synchronizatio"]
 
-Screenshots and the Excel report land in data/e2e/.
+Without a phone, `--no-phone` stops after Step 1 (and the theme check).
+Screenshots, the Excel report and the session zip land in data/e2e/.
 """
 
 from __future__ import annotations
@@ -41,6 +42,7 @@ def main() -> int:
     ap.add_argument("--items", type=int, default=5)
     ap.add_argument("--sheet", default="ONOFFTemperature Synchronizatio")
     ap.add_argument("--base", default=BASE)
+    ap.add_argument("--no-phone", action="store_true", help="only Step 1 + theme (no device attached)")
     args = ap.parse_args()
     globals()["BASE"] = args.base.rstrip("/")
     OUT.mkdir(parents=True, exist_ok=True)
@@ -62,7 +64,7 @@ def main() -> int:
         shot(page, "01_open")
 
         print("2. import file, pick one sheet")
-        page.get_by_role("button", name="Nạp file").first.click()
+        page.get_by_role("button", name="Nạp file", exact=True).first.click()
         page.locator("input[type=file]").set_input_files(str(REPO / "public" / "DieuKhienXe_Pre.xlsx"))
         sheet_row = page.locator(".modal .sheet-item", has_text=args.sheet)
         sheet_row.wait_for(timeout=30000)
@@ -83,21 +85,38 @@ def main() -> int:
         page.get_by_role("heading", name=name).wait_for()
         shot(page, "03_table")
 
-        print("4. block 1: generate + verify")
-        page.get_by_role("button", name="Sinh audio + Verify").click()
+        print("4. step 1: generate, then verify (two jobs)")
+        page.get_by_role("button", name="Sinh audio (tất cả)").click()
         page.wait_for_timeout(1500)
-        shot(page, "04_block1_running")
+        shot(page, "04_generate_running")
+        wait_job_end(page, 600)
+        page.wait_for_timeout(1000)
+        page.get_by_role("button", name="Verify (tất cả)").click()
         wait_job_end(page, 600)
         page.wait_for_timeout(1500)
-        shot(page, "05_block1_done")
+        shot(page, "05_verify_done")
         summary = page.request.get(f"{BASE}/api/audio-sets/{set_id}/summary").json()
         print("   block1 summary:", summary)
 
-        print("5. block 2: run on the phone")
-        page.get_by_role("button", name="Test app").click()
-        page.get_by_role("button", name="Chạy trên app").wait_for()
+        print("4b. theme: light -> dark -> system")
+        theme = page.get_by_title("Đổi giao diện sáng / tối")
+        for _ in range(3):
+            theme.click()
+            page.wait_for_timeout(300)
+            mode = page.evaluate("document.documentElement.dataset.theme || 'system'")
+            shot(page, f"05_theme_{mode}")
+        if args.no_phone:
+            browser.close()
+            if errors:
+                print("PAGE ERRORS:", *errors, sep="\n  ")
+                return 1
+            return 0
+
+        print("5. step 2: run on the phone")
+        page.get_by_role("button", name="Bước 2 — Test app").click()
+        page.get_by_role("button", name="Chạy trên app (tất cả)").wait_for()
         shot(page, "06_app_panel")
-        page.get_by_role("button", name="Chạy trên app").click()
+        page.get_by_role("button", name="Chạy trên app (tất cả)").click()
         page.wait_for_timeout(9000)
         shot(page, "07_app_running")
         wait_job_end(page, 60 * args.items + 120)
@@ -108,12 +127,19 @@ def main() -> int:
         for r in page.request.get(f"{BASE}/api/app-runs/{run['id']}/results").json():
             print(f"   {r['status']:<13} | {r['text_tts']} | app: {r['app_text']} | {r['error'] or ''}")
 
-        print("6. export Excel (with block 2)")
+        print("6. export the form Excel and the session zip")
         with page.expect_download() as dl:
-            page.get_by_role("button", name="Xuất Excel", exact=True).click()
+            page.get_by_role("button", name="Xuất Excel (form)").click()
         dest = OUT / dl.value.suggested_filename
         dl.value.save_as(dest)
-        print("   report:", dest.name)
+        print("   form:", dest.name)
+        page.get_by_role("button", name="Xuất zip phiên").click()
+        shot(page, "09_zip_dialog")
+        with page.expect_download(timeout=120000) as dl:
+            page.get_by_role("button", name="Xuất zip", exact=True).click()
+        dest = OUT / dl.value.suggested_filename
+        dl.value.save_as(dest)
+        print("   zip:", dest.name)
 
         browser.close()
         if errors:
