@@ -1,0 +1,31 @@
+[project]
+name = "tts-stt-tool"
+version = "0.1.0"
+description = "Automation test TTS -> STT for Vietnamese voice assistant apps"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "numpy>=2.5.5",
+    "soundfile>=0.14.0",
+    "soxr>=1.1.0",
+    "vieneu>=3.8.5",
+    "wyoming>=1.11.0",
+]
+
+[project.scripts]
+tts-stt-tool = "tts_stt_tool.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8", "pytest-asyncio>=0.24"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["backend/tts_stt_tool"]
+
+[tool.pytest.ini_options]
+testpaths = ["backend/tests"]
+asyncio_mode = "auto"
+markers = ["sample: uses public/DieuKhienXe_Pre.xlsx", "gpu: needs real TTS model", "live: needs running wyoming server"]
+addopts = "-m 'not gpu and not live'"
