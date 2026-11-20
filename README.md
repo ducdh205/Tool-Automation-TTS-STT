@@ -62,18 +62,20 @@ Thanh trái có 2 bước. Nút **◐ / ☀ / ☾** ở chân thanh trái đổi
 1. **Nạp file** → chọn các sheet tính năng (form testcase 36 cột, header ở dòng 4, câu nói ở cột M).
    File csv/xlsx khác form: chọn cột câu nói.
 2. Dòng không đọc được (dòng Hệ thống, chú thích trong ngoặc, ký tự lạ như `…`, `→`, `<script>`) tự chuyển
-   **Không áp dụng**. Nhấp đúp ô *Câu đọc* để sửa và bật lại; nút **⏻** cuối dòng tạm loại / bật lại một câu.
+   **Không áp dụng**. Nhấp đúp ô *Câu đọc* để sửa và bật lại; nút **⏻** cuối dòng (hiện khi rê chuột) tạm loại / bật lại một câu.
+   Biểu tượng ✎ cạnh câu đọc nghĩa là câu đọc khác câu gốc — rê chuột để xem câu gốc.
    "Hey Vita / Hey Vi" ở đầu câu được bỏ trước khi sinh audio.
 3. **Chọn case** bằng ô vuông đầu dòng (Shift+click chọn một dải; ô ở tiêu đề chọn mọi dòng đang hiển thị
    theo bộ lọc). Không chọn gì = các nút áp dụng cho tất cả.
 4. **Sinh audio** → sinh audio cho các câu chưa có audio (trạng thái *Đã sinh audio*).
 5. **Verify** → wyoming nghe lại: khớp (WER = 0) là **Đạt**, không khớp là **Audio không đạt** (không tự sinh lại).
-6. **Sinh lại** (hoặc **⟳** trên từng dòng) → sinh audio mới với seed khác cho câu không đạt, rồi bấm **Verify** lại.
-   **Dừng** bất cứ lúc nào — bấm lại sẽ làm tiếp các câu chưa xong.
-7. **Xuất Excel** (5 sheet: Tổng quan, Khối 1 – Verify, Audio không đạt, Không áp dụng, Lỗi) hoặc **CSV**.
+6. **Sinh lại** (hoặc **⟳** trên từng dòng, hiện khi rê chuột) → sinh audio mới với seed khác cho câu không đạt, rồi bấm **Verify** lại.
+   Khi đang chạy, thanh tiến độ và nút **Dừng** hiện dưới thanh thao tác — bấm chạy lại sẽ làm tiếp các câu chưa xong.
+7. **Xuất ▾ → Excel** (5 sheet: Tổng quan, Khối 1 – Verify, Audio không đạt, Không áp dụng, Lỗi) hoặc **CSV**.
 
-**Thanh thao tác Bước 1** có giọng VieNeu cho bộ audio mới, ngưỡng WER theo phần trăm và thời gian chờ STT tính theo giây.
-Ngưỡng cảnh báo tỉ lệ audio bị loại (mặc định 10%) nằm trong **Cài đặt** ở thanh trái.
+**Cài đặt chạy** là nút tóm tắt bên phải thanh thao tác Bước 1 (vd. `Ngọc Huyền · WER ≤ 0% · 30s`). Bấm vào để sửa
+giọng VieNeu cho bộ audio mới, ngưỡng WER (%), thời gian chờ STT (giây) và ngưỡng cảnh báo tỉ lệ loại (mặc định 10%).
+Tỉ lệ Đạt / Loại hiện cạnh tên bộ audio; Loại chuyển đỏ khi vượt ngưỡng cảnh báo.
 
 ## Khối 2 — test trên điện thoại
 
@@ -86,16 +88,17 @@ Không cài gì lên điện thoại (chỉ dùng `adb` có sẵn của Android)
 3. Mở app cần test ở **màn hình chính**. Đặt âm lượng loa máy tính ~70%, điện thoại cách loa 20–40 cm,
    phòng yên tĩnh (app bắt cả tiếng nói xung quanh).
 4. Chạy Bước 1 trước — chỉ câu **Đạt** mới được test trên app (Bước 2 bị khóa khi chưa có câu Đạt).
-5. Thanh trái → **Bước 2 — Test app** → chọn case (hoặc không chọn = tất cả câu Đạt), thiết bị, hồ sơ app →
+5. Thanh trái → **Bước 2 — Test app** → chọn case (hoặc không chọn = tất cả câu Đạt), hồ sơ app (và thiết bị nếu cắm nhiều máy) →
    **Chạy trên app**. Mỗi lần bấm là **một phiên test mới**. Mỗi câu khoảng 13–20 giây.
    Kết quả: **Đúng / Sai / Lỗi thao tác** (lỗi do tool không điều khiển được app, không tính vào tỉ lệ đúng).
    Câu **Sai** và **Lỗi thao tác** được chụp màn hình ngay lúc đó (trước khi đóng bảng).
-   **Chạy tiếp** chạy lại các câu Chờ và Lỗi thao tác của phiên đang chọn.
-6. Xuất kết quả của phiên đang chọn:
-   - **Xuất Excel (form)** — file theo form testcase 36 cột, chỉ các case đã test: cột P *Kết quả thực tế*,
+   **Chạy tiếp** chạy lại các câu Chờ và Lỗi thao tác của phiên đang chọn. Ở Bước 2, bộ lọc trạng thái lọc theo
+   kết quả app của phiên đang chọn; tỉ lệ Đúng hiện cạnh tên bộ audio.
+6. Xuất kết quả của phiên đang chọn (nút **Xuất ▾**):
+   - **Excel theo form** — file theo form testcase 36 cột, chỉ các case đã test: cột P *Kết quả thực tế*,
      S *KQ ASR* (Pass/Fail), X *KẾT QUẢ TỔNG* (chỉ điền `Fail` khi app nghe sai), Z *Bằng chứng* (folder trong zip),
      AA *Thông tin lần chạy*, AB *Ghi chú* (WER/CER, từ sai). File gốc không bị sửa.
-   - **Xuất zip phiên** — chọn audio kèm theo: chỉ case Sai / Lỗi thao tác (mặc định), tất cả, hoặc các case đang chọn:
+   - **Zip phiên** — chọn audio kèm theo: chỉ case Sai / Lỗi thao tác (mặc định), tất cả, hoặc các case đang chọn:
 
      ```
      Phien12_2026-11-20_1530_<máy>/

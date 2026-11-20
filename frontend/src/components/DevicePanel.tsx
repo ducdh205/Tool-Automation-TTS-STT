@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Icon } from "./Icon";
 import { api, type AppProfile, type DeviceInfo, type DeviceInputBody, type DeviceKey, type DeviceStatus, type UiNodeInfo } from "../api";
 
 const STATE_LABEL: Record<string, string> = {
@@ -232,7 +233,7 @@ export function DevicePanel({ jobLogs = [], profile = null, onProfileSaved }: Pr
           <button className={`btn small-btn ${pinning ? "primary" : ""}`} disabled={!profile || locked}
             onClick={() => { setPinning(!pinning); setPinned(null); setPinError(null); }}
             title="Bật rồi chạm lên màn hình để xem nhãn nút và gán cho hồ sơ app">
-            {pinning ? "Đang ghim — chạm lên nút trên màn hình" : "Ghim nút cho hồ sơ app"}
+            <Icon name="pin" size={13} />{pinning ? "Đang ghim — chạm lên nút trên màn hình" : "Ghim nút cho hồ sơ app"}
           </button>
           {pinning && pinned && (
             <div className="pin-result">
@@ -251,12 +252,13 @@ export function DevicePanel({ jobLogs = [], profile = null, onProfileSaved }: Pr
       {online && (
         <div className="device-controls">
           <div className="device-keys">
-            <button className="btn" title="Quay lại" onClick={() => key("back")}>◁</button>
-            <button className="btn" title="Màn hình chính" onClick={() => key("home")}>○</button>
-            <button className="btn" title="Đa nhiệm" onClick={() => key("recents")}>▢</button>
-            <button className="btn" title="Giảm âm lượng" onClick={() => key("voldown")}>🔉</button>
-            <button className="btn" title="Tăng âm lượng" onClick={() => key("volup")}>🔊</button>
-            <button className="btn" title="Nút nguồn (tắt/bật màn hình)" onClick={() => key("power")}>⏻</button>
+            <button className="btn" title="Quay lại" aria-label="Quay lại" onClick={() => key("back")}><Icon name="back" /></button>
+            <button className="btn" title="Màn hình chính" aria-label="Màn hình chính" onClick={() => key("home")}><Icon name="home" /></button>
+            <button className="btn" title="Đa nhiệm" aria-label="Đa nhiệm" onClick={() => key("recents")}><Icon name="recents" /></button>
+            <span className="divider" />
+            <button className="btn" title="Giảm âm lượng" aria-label="Giảm âm lượng" onClick={() => key("voldown")}><Icon name="volDown" /></button>
+            <button className="btn" title="Tăng âm lượng" aria-label="Tăng âm lượng" onClick={() => key("volup")}><Icon name="volUp" /></button>
+            <button className="btn" title="Nút nguồn (tắt/bật màn hình)" aria-label="Nút nguồn" onClick={() => key("power")}><Icon name="power" /></button>
           </div>
           <form
             className="device-text"
@@ -267,7 +269,7 @@ export function DevicePanel({ jobLogs = [], profile = null, onProfileSaved }: Pr
             }}
           >
             <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Gõ chữ không dấu, Enter để gửi" />
-            <button className="btn" type="button" title="Xoá 1 ký tự" onClick={() => key("del")}>⌫</button>
+            <button className="btn" type="button" title="Xoá 1 ký tự" aria-label="Xoá 1 ký tự" onClick={() => key("del")}><Icon name="backspace" /></button>
           </form>
         </div>
       )}

@@ -12,6 +12,7 @@ Screenshots, the Excel report and the session zip land in data/e2e/.
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 import time
 from pathlib import Path
@@ -128,12 +129,15 @@ def main() -> int:
             print(f"   {r['status']:<13} | {r['text_tts']} | app: {r['app_text']} | {r['error'] or ''}")
 
         print("6. export the form Excel and the session zip")
+        export_menu = page.get_by_role("button", name="Xuất", exact=True)
+        export_menu.click()
         with page.expect_download() as dl:
-            page.get_by_role("button", name="Xuất Excel (form)").click()
+            page.get_by_role("button", name=re.compile(r"^Excel theo form")).click()
         dest = OUT / dl.value.suggested_filename
         dl.value.save_as(dest)
         print("   form:", dest.name)
-        page.get_by_role("button", name="Xuất zip phiên").click()
+        export_menu.click()
+        page.get_by_role("button", name=re.compile(r"^Zip phiên")).click()
         shot(page, "09_zip_dialog")
         with page.expect_download(timeout=120000) as dl:
             page.get_by_role("button", name="Xuất zip", exact=True).click()

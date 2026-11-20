@@ -131,7 +131,31 @@ describe("app mode layout", () => {
     const { container } = render(<ItemTable items={[makeItem(0, { status: "Đạt" })]} onPatch={() => {}} app={new Map()} />);
     expect(container.querySelector(".table")?.classList.contains("app")).toBe(true);
     expect(container.querySelector(".row-actions")).toBeNull();
-    expect(container.querySelector(".row.head")?.children.length).toBe(12);
+    expect(container.querySelector(".row.head")?.children.length).toBe(6);
+  });
+});
+
+describe("compact columns", () => {
+  it("folds the source text into a marker and shows the sheet column only when asked", () => {
+    const item = makeItem(0, { text_raw: "Bật quạt 2", text_tts: "bật quạt hai" });
+    const { container, rerender } = render(<ItemTable items={[item]} onPatch={() => {}} />);
+    expect(screen.getByLabelText("Câu gốc: Bật quạt 2")).toBeTruthy();
+    expect(screen.queryByText("Sheet")).toBeNull();
+    rerender(<ItemTable items={[item]} onPatch={() => {}} showSheet />);
+    expect(screen.getByText("Sheet")).toBeTruthy();
+    expect(container.querySelector(".row.head")?.children.length).toBe(8);
+  });
+
+  it("shows WER with the CER beside it", () => {
+    const item = makeItem(0, { status: "Audio không đạt", ref_text: "bật quát", wer: 0.5, cer: 0.125 });
+    render(<ItemTable items={[item]} onPatch={() => {}} />);
+    expect(screen.getByText("50%")).toBeTruthy();
+    expect(screen.getByText("12,5%")).toBeTruthy();
+  });
+
+  it("keeps the sheet text visible when a row has no reading text", () => {
+    render(<ItemTable items={[makeItem(0, { text_raw: "[hệ thống]", text_tts: null, enabled: 0 })]} onPatch={() => {}} />);
+    expect(screen.getByText("[hệ thống]")).toBeTruthy();
   });
 });
 

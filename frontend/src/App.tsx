@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  api, ApiError, type AppProfile, type AppResult, type AppRun, type AudioSet, type DeviceStatus, type Health, type Item,
-  type ItemStatus, type Job, type ProgressEvent, type Settings,
+  api, ApiError, STATUSES, type AppProfile, type AppResult, type AppRun, type AudioSet, type DeviceStatus, type Health,
+  type Item, type Job, type ProgressEvent, type Settings,
 } from "./api";
+import { formatPct } from "./format";
+import { APP_STATUSES, passRate } from "./status";
 import { classifyEvent } from "./events";
 import { AppRunPanel } from "./components/AppRunPanel";
 import { connectEvents } from "./ws";
@@ -12,14 +14,16 @@ import { RunBar } from "./components/RunBar";
 import { RunSettings } from "./components/RunSettings";
 import { ItemTable } from "./components/ItemTable";
 import { ImportDialog } from "./components/ImportDialog";
-import { SettingsPanel } from "./components/SettingsPanel";
 import { DevicePanel } from "./components/DevicePanel";
 import { ExportZipDialog, type ZipAudio } from "./components/ExportZipDialog";
 import { clickRow, emptySelection, prune, toggleAllVisible, type Selection } from "./selection";
 
-function countByStatus(items: Item[]): Record<string, number> {
+function countBy<T>(rows: Iterable<T>, key: (r: T) => string | undefined): Record<string, number> {
   const out: Record<string, number> = {};
-  for (const it of items) out[it.status] = (out[it.status] ?? 0) + 1;
+  for (const r of rows) {
+    const k = key(r);
+    if (k !== undefined) out[k] = (out[k] ?? 0) + 1;
+  }
   return out;
 }
 
@@ -35,9 +39,9 @@ export default function App() {
   const [setId, setSetId] = useState<number | null>(null);
   const [items, setItems] = useState<Item[]>([]);
   const [job, setJob] = useState<Job | null>(null);
-  const [filter, setFilter] = useState<ItemStatus | "all">("all");
+  const [filter, setFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
-  const [dialog, setDialog] = useState<"import" | "settings" | "zip" | null>(null);
+  const [dialog, setDialog] = useState<"import" | "zip" | null>(null);
   const [toast, setToast] = useState<{ text: string; kind: "info" | "error" } | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [settingsLoadFailed, setSettingsLoadFailed] = useState(false);
@@ -184,14 +188,17 @@ export default function App() {
   }), [loadItems, loadSets, loadAppRuns, loadAppResults]);
 
   const appMode = section === "step2";
+  // Step 2 filters on the app verdict of the selected run; step 1 on the Block 1 status.
+  const statusOf = useCallback((it: Item) => (appMode ? appResults.get(it.id)?.status : it.status),
+    [appMode, appResults]);
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
     return items.filter((it) =>
       (!appMode || it.status === "Đạt") &&
-      (filter === "all" || it.status === filter) &&
+      (filter === "all" || statusOf(it) === filter) &&
       (!q || it.text_raw.toLowerCase().includes(q) || it.tc_id.toLowerCase().includes(q) ||
         (it.text_tts ?? "").toLowerCase().includes(q)));
-  }, [items, filter, search, appMode]);
+  }, [items, filter, search, appMode, statusOf]);
   const selection = appMode ? sel2 : sel1;
   const setSelection = appMode ? setSel2 : setSel1;
   const isSelectable = appMode ? step2Selectable : step1Selectable;
@@ -272,6 +279,36 @@ export default function App() {
 
   const current = sets.find((s) => s.id === setId);
   const currentRun = appRuns.find((r) => r.id === appRunId);
+  const passedItems = items.filter(step2Selectable);
+  const summary = appMode ? countBy(passedItems, (it) => appResults.get(it.id)?.status) : countBy(items, (it) => it.status);
+  const total = appMode ? passedItems.length : items.length;
+
+  // Headline numbers next to the title: what the user checks after every run.
+  let kpis = null;
+  if (current && !appMode) {
+    const passRatio = passRate(summary["Đạt"] ?? 0, summary["Audio không đạt"] ?? 0);
+    const rejectRatio = passRatio === null ? null : 1 - passRatio;
+    const tooMany = rejectRatio !== null && rejectRatio > (settings?.reject_warn_ratio ?? 0.1);
+    kpis = (
+      <>
+        <span className="kpi"><b>{items.length}</b> câu</span>
+        <span className="kpi ok"><b>{formatPct(passRatio)}</b> Đạt</span>
+        <span className={`kpi ${tooMany ? "bad" : ""}`} title={tooMany ? "Tỉ lệ loại vượt ngưỡng cảnh báo" : undefined}>
+          <b>{formatPct(rejectRatio)}</b> Loại
+        </span>
+      </>
+    );
+  } else if (current && currentRun) {
+    kpis = (
+      <>
+        <span className="kpi ok"><b>{formatPct(passRate(currentRun.summary["Đúng"] ?? 0, currentRun.summary["Sai"] ?? 0))}</b> Đúng</span>
+        <span className="kpi muted">#{currentRun.id} · {currentRun.device_model ?? currentRun.serial}
+          {currentRun.app_version ? ` · app ${currentRun.app_version}` : ""}</span>
+      </>
+    );
+  } else if (current) {
+    kpis = <span className="kpi"><b>{passedItems.length}</b> câu Đạt sẵn sàng</span>;
+  }
 
   return (
     <div className={`layout ${appMode ? "" : "no-device"}`}>
@@ -286,25 +323,29 @@ export default function App() {
         sets={sets}
         currentSetId={setId}
         onSelectSet={setSetId}
-        onSettings={() => setDialog("settings")}
         device={deviceStatus}
       />
       <main className="center">
-        <div className="center-head">
-          <h1>{current ? current.name : "Chưa có bộ audio"}</h1>
-          {current && (
-            <span className="muted small">
-              {current.source_file} · {current.sheets.length} sheet · giọng {current.voice}
-            </span>
-          )}
-        </div>
+        <header className="center-head">
+          <div className="title-block">
+            <h1 className="ellipsis">{current ? current.name : "Chưa có bộ audio"}</h1>
+            {current && (
+              <span className="muted small ellipsis" title={current.sheets.join(", ")}>
+                {current.source_file} · {current.sheets.length} sheet · giọng {current.voice ?? "mặc định"}
+              </span>
+            )}
+          </div>
+          {kpis && <div className="kpis">{kpis}</div>}
+        </header>
         <RunBar
           mode={appMode ? "step2" : "step1"}
           selectedCount={selection.ids.size}
           onClearSelection={() => setSelection(emptySelection)}
           hasSet={setId !== null}
           job={job}
-          summary={countByStatus(items)}
+          statuses={appMode ? APP_STATUSES : STATUSES}
+          summary={summary}
+          total={total}
           filter={filter}
           search={search}
           onFilter={setFilter}
@@ -315,22 +356,20 @@ export default function App() {
           onRegenerate={() => startBlock1("regenerate", selectedIds)}
           onStop={stop}
           onReport={report}
-          rejectWarn={settings?.reject_warn_ratio ?? 0.1}
           settingsSaving={settingsSaving}
           settingsControls={settings ? (
             <RunSettings settings={settings} busy={!!job} saving={settingsSaving} onSave={saveSettings} />
           ) : settingsLoadFailed ? (
-            <div className="small">Chưa tải được cài đặt. <button className="link-btn" onClick={loadSettings}>Thử lại</button></div>
-          ) : <div className="muted small">Đang tải cài đặt…</div>}
-        />
-        {appMode && setId !== null && (
+            <span className="small">Chưa tải được cài đặt. <button className="link-btn" onClick={loadSettings}>Thử lại</button></span>
+          ) : <span className="muted small">Đang tải cài đặt…</span>}
+          appActions={appMode && setId !== null && (
           <AppRunPanel
             devices={devices}
             profiles={profiles}
             runs={appRuns}
             runId={appRunId}
             busy={!!job || settingsSaving}
-            passedCount={items.filter((i) => i.status === "Đạt").length}
+            passedCount={passedItems.length}
             selectedCount={sel2.ids.size}
             onExportForm={exportForm}
             onExportZip={() => setDialog("zip")}
@@ -338,23 +377,8 @@ export default function App() {
             onResume={resumeApp}
             onSelectRun={setAppRunId}
           />
-        )}
-        {setId !== null && (
-          <aside className="scoring-guide" aria-label="Cách chấm WER và CER">
-            <ul>
-              <li><strong>WER</strong> đếm lỗi theo từ. <strong>CER</strong> đếm lỗi theo ký tự.</li>
-            </ul>
-            <p>
-              <strong>Cách chấm đạt</strong> · Có nội dung text và WER ≤ ngưỡng WER đặt trên thanh thao tác ở Bước 1.
-              Vượt ngưỡng hoặc kết quả rỗng thì chấm {appMode ? "Sai" : "Audio không đạt"}. CER chỉ để tham khảo.
-            </p>
-            <p><strong>Ví dụ</strong> với câu đọc “Bật quạt” ở ngưỡng 0%</p>
-            <ul>
-              <li>“bật quạt.” → Đạt (WER 0%, CER 0%).</li>
-              <li>“Tắt quạt” → Không đạt (WER 50%, CER 25%).</li>
-            </ul>
-          </aside>
-        )}
+          )}
+        />
         {setId === null ? (
           <div className="empty">
             <p>Nạp file testcase (.xlsx / .csv) để bắt đầu.</p>
@@ -365,6 +389,7 @@ export default function App() {
             items={visible}
             onPatch={patch}
             app={appMode && appRunId !== null ? appResults : undefined}
+            showSheet={(current?.sheets.length ?? 0) > 1}
             selected={selection.ids}
             isSelectable={isSelectable}
             onRowSelect={(index, shift) => {
@@ -395,16 +420,6 @@ export default function App() {
             setFilter("all");
             notify("Đã tạo bộ audio.");
           }}
-        />
-      )}
-      {dialog === "settings" && (
-        <SettingsPanel
-          rejectWarn={settings?.reject_warn_ratio}
-          loadFailed={settingsLoadFailed}
-          saving={settingsSaving}
-          onRetry={loadSettings}
-          onSave={(value) => saveSettings({ reject_warn_ratio: value })}
-          onClose={() => setDialog(null)}
         />
       )}
       {dialog === "zip" && currentRun && (

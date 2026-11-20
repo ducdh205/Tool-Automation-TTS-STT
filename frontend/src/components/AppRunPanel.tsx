@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { AppProfile, AppRun, DeviceInfo } from "../api";
-import { formatPct } from "../format";
+import { Icon } from "./Icon";
+import { Popover } from "./Popover";
 
 interface Props {
   devices: DeviceInfo[];
@@ -18,12 +19,9 @@ interface Props {
   onSelectRun: (runId: number | null) => void;
 }
 
-function rate(s: Record<string, number>): number | null {
-  const ok = s["Đúng"] ?? 0;
-  const tested = ok + (s["Sai"] ?? 0);
-  return tested ? ok / tested : null;
-}
+const runLabel = (r: AppRun) => `#${r.id} · ${r.device_model ?? r.serial} · ${r.created_at.slice(5, 16).replace("T", " ")}`;
 
+/** Step 2 actions, rendered inside the RunBar toolbar: start a run on the left, past runs and exports on the right. */
 export function AppRunPanel(p: Props) {
   const ready = p.devices.filter((d) => d.state === "device");
   const [serial, setSerial] = useState<string>("");
@@ -36,53 +34,51 @@ export function AppRunPanel(p: Props) {
   const canStart = !!serial && !!profile && !p.busy && p.passedCount > 0;
 
   return (
-    <div className="apprun">
-      <div className="toolbar">
-        <label className="inline">Thiết bị
-          <select value={serial} onChange={(e) => setSerial(e.target.value)} disabled={!ready.length}>
-            {!ready.length && <option value="">Chưa có thiết bị</option>}
-            {ready.map((d) => <option key={d.serial} value={d.serial}>{d.model ?? d.serial}</option>)}
-          </select>
-        </label>
-        <label className="inline">Hồ sơ app
-          <select value={profile} onChange={(e) => setProfile(e.target.value)}>
-            {p.profiles.map((x) => <option key={x.name}>{x.name}</option>)}
-          </select>
-        </label>
-        <button className="btn primary" disabled={!canStart} onClick={() => p.onStart(serial, profile)}
-          title={p.passedCount ? "" : "Chạy Khối 1 trước: chỉ câu Đạt mới được test trên app"}>
-          Chạy trên app ({p.selectedCount || "tất cả"})
-        </button>
-        <span className="spacer" />
-        <label className="inline">Lần test
-          <select value={p.runId ?? ""} onChange={(e) => p.onSelectRun(e.target.value ? Number(e.target.value) : null)}>
-            <option value="">—</option>
-            {p.runs.map((r) => <option key={r.id} value={r.id}>#{r.id} · {r.device_model ?? r.serial} · {r.created_at.slice(5, 16).replace("T", " ")}</option>)}
-          </select>
-        </label>
-        <button className="btn" disabled={!run || p.busy || pending === 0} onClick={() => run && p.onResume(run.id)}>
-          Chạy tiếp{pending ? ` (${pending})` : ""}
-        </button>
-        <button className="btn" disabled={!run} onClick={p.onExportForm}
-          title="File Excel theo form testcase: cột Kết quả thực tế, KQ ASR, Bằng chứng…">
-          Xuất Excel (form)
-        </button>
-        <button className="btn" disabled={!run} onClick={p.onExportZip}
-          title="Mỗi testcase một folder: kết quả, log, ảnh chụp, audio">
-          Xuất zip phiên
-        </button>
-      </div>
-      <div className="small muted">
-        {run ? (
-          <span>
-            <b className="accent">Đúng {formatPct(rate(run.summary))}</b>
-            {" · "}Đúng {run.summary["Đúng"] ?? 0} · Sai {run.summary["Sai"] ?? 0} · Lỗi thao tác {run.summary["Lỗi thao tác"] ?? 0} · Chờ {run.summary["Chờ"] ?? 0}
-            {run.app_version ? ` · app ${run.app_version}` : ""}
-          </span>
-        ) : (
-          <span>{p.passedCount} câu Đạt sẵn sàng · Đặt âm lượng loa máy tính ~70%, điện thoại cách loa 20–40 cm, phòng yên tĩnh.</span>
+    <>
+      {/* One phone is the usual case and the device panel already names it: only ask when there is a choice. */}
+      {ready.length === 0 && <span className="muted small">Chưa có thiết bị</span>}
+      {ready.length > 1 && (
+        <select className="compact-select" aria-label="Thiết bị" value={serial} onChange={(e) => setSerial(e.target.value)}>
+          {ready.map((d) => <option key={d.serial} value={d.serial}>{d.model ?? d.serial}</option>)}
+        </select>
+      )}
+      <select className="compact-select" aria-label="Hồ sơ app" title="Hồ sơ app" value={profile}
+        onChange={(e) => setProfile(e.target.value)}>
+        {p.profiles.map((x) => <option key={x.name}>{x.name}</option>)}
+      </select>
+      <button className="btn primary" disabled={!canStart} onClick={() => p.onStart(serial, profile)}
+        title={p.passedCount ? "" : "Chạy Khối 1 trước: chỉ câu Đạt mới được test trên app"}>
+        <Icon name="play" />Chạy trên app ({p.selectedCount || "tất cả"})
+      </button>
+      <Popover iconOnly buttonClassName="info-btn" panelLabel="Chuẩn bị trước khi chạy" label={<Icon name="info" />}>
+        {() => (
+          <div className="tip">
+            Đặt âm lượng loa máy tính ~70%, điện thoại cách loa 20–40 cm, phòng yên tĩnh.
+          </div>
         )}
-      </div>
-    </div>
+      </Popover>
+      <span className="spacer" />
+      <select className="compact-select" aria-label="Lần test" title="Lần test" value={p.runId ?? ""}
+        onChange={(e) => p.onSelectRun(e.target.value ? Number(e.target.value) : null)} disabled={!p.runs.length}>
+        {!p.runs.length && <option value="">Chưa có lần test</option>}
+        {p.runs.map((r) => <option key={r.id} value={r.id}>{runLabel(r)}</option>)}
+      </select>
+      <button className="btn" disabled={!run || p.busy || pending === 0} onClick={() => run && p.onResume(run.id)}>
+        <Icon name="refresh" />Chạy tiếp{pending ? ` (${pending})` : ""}
+      </button>
+      <Popover buttonClassName="btn" panelLabel="Xuất phiên test" align="right" disabled={!run}
+        label={<><Icon name="download" />Xuất<Icon name="chevron" size={13} /></>}>
+        {(_open, close) => (
+          <div className="menu">
+            <button className="menu-item" onClick={() => { close(); p.onExportForm(); }}>
+              Excel theo form<small>Kết quả thực tế, KQ ASR, Bằng chứng…</small>
+            </button>
+            <button className="menu-item" onClick={() => { close(); p.onExportZip(); }}>
+              Zip phiên…<small>Mỗi testcase một folder: kết quả, log, ảnh, audio</small>
+            </button>
+          </div>
+        )}
+      </Popover>
+    </>
   );
 }

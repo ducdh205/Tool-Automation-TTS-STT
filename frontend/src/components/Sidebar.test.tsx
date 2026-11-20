@@ -29,17 +29,26 @@ describe("adbStatus", () => {
   });
 });
 
-describe("Sidebar ADB line", () => {
-  it("renders the device name in the footer", () => {
-    render(<Sidebar section="step1" step2Ready onSection={() => {}} health={null} sets={[]} currentSetId={null}
-      onSelectSet={() => {}} onSettings={() => {}}
+describe("Sidebar status row", () => {
+  const base = { section: "step1" as const, step2Ready: true, onSection: () => {}, sets: [], currentSetId: null, onSelectSet: () => {} };
+
+  it("names the connected phone in the footer", () => {
+    render(<Sidebar {...base} health={{ wyoming: true, wyoming_error: null, gpu: true, job: null }}
       device={{ adb: true, error: null, devices: [{ serial: "S1", state: "device", model: "Pixel 7" }] }} />);
-    expect(screen.getByText("ADB · Pixel 7")).toBeTruthy();
+    expect(screen.getByText("Pixel 7")).toBeTruthy();
+    expect(screen.queryByText(/chưa chạy/)).toBeNull();
+  });
+
+  it("spells out what needs attention", () => {
+    render(<Sidebar {...base} health={{ wyoming: false, wyoming_error: "refused", gpu: false, job: null }}
+      device={{ adb: true, error: null, devices: [{ serial: "S1", state: "unauthorized", model: null }] }} />);
+    expect(screen.getByText("STT tham chiếu chưa chạy")).toBeTruthy();
+    expect(screen.getByText("ADB · S1 — chưa cho phép")).toBeTruthy();
   });
 });
 
 describe("Sidebar steps", () => {
-  const base = { onSection: () => {}, health: null, sets: [], currentSetId: null, onSelectSet: () => {}, onSettings: () => {} };
+  const base = { onSection: () => {}, health: null, sets: [], currentSetId: null, onSelectSet: () => {} };
 
   it("has two steps; step 2 is disabled until a row passed", () => {
     render(<Sidebar {...base} section="step1" step2Ready={false} />);

@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { api, type AppResult, type Item } from "../api";
+import { api, type AppResult, type Item, type WordOp } from "../api";
 import { formatPct, renderOps } from "../format";
+import { STATUS_CLASS } from "../status";
+import { Icon } from "./Icon";
 
 const ROW_H = 34;
 const NONE: ReadonlySet<number> = new Set();
@@ -11,6 +13,8 @@ interface Props {
   onPatch: (id: number, patch: { text_tts?: string; enabled?: boolean }) => void;
   /** Block 2: results of the selected app run, keyed by item id. Switches the STT columns to the app's. */
   app?: Map<number, AppResult>;
+  /** Show the Sheet column (only worth its width when the set spans several sheets). */
+  showSheet?: boolean;
   /** Case selection (ids). Without `onRowSelect` the checkboxes are inert. */
   selected?: ReadonlySet<number>;
   isSelectable?: (it: Item) => boolean;
@@ -28,37 +32,29 @@ function HeadCheckbox({ checked, indeterminate, disabled, onChange }:
     checked={checked} disabled={disabled} onChange={onChange} />;
 }
 
-const STATUS_CLASS: Record<string, string> = {
-  "Chờ": "st-pending", "Không áp dụng": "st-skip", "Đã sinh audio": "st-gen",
-  "Đạt": "st-pass", "Audio không đạt": "st-fail", "Lỗi": "st-error",
-  "Đúng": "st-pass", "Sai": "st-fail", "Lỗi thao tác": "st-error",
-};
-
-function AppText({ r }: { r: AppResult | undefined }) {
-  if (!r) return <span className="muted">—</span>;
-  if (r.status === "Lỗi thao tác") return <span className="muted" title={r.log ?? ""}>{r.error}</span>;
-  if (r.status === "Chờ") return <span className="muted">chưa test</span>;
-  if (!r.ops.length) return <span>{r.app_text || <i className="muted">(app không trả câu)</i>}</span>;
+function Ops({ ops }: { ops: WordOp[] }) {
   return (
     <span>
-      {renderOps(r.ops).map((s, i) => (
+      {renderOps(ops).map((s, i) => (
         <span key={i}><span className={`op-${s.kind}`} title={s.title}>{s.text}</span>{" "}</span>
       ))}
     </span>
   );
 }
 
+function AppText({ r }: { r: AppResult | undefined }) {
+  if (!r) return <span className="muted">—</span>;
+  if (r.status === "Lỗi thao tác") return <span className="muted" title={r.log ?? ""}>{r.error}</span>;
+  if (r.status === "Chờ") return <span className="muted">chưa test</span>;
+  if (!r.ops.length) return <span>{r.app_text || <i className="muted">(app không trả câu)</i>}</span>;
+  return <Ops ops={r.ops} />;
+}
+
 function SttText({ item }: { item: Item }) {
   if (item.error && item.status === "Lỗi") return <span className="muted" title={item.error}>{item.error}</span>;
   if (!item.ref_text && !item.ops.length) return <span className="muted">—</span>;
   if (!item.ops.length) return <span>{item.ref_text}</span>;
-  return (
-    <span>
-      {renderOps(item.ops).map((s, i) => (
-        <span key={i}><span className={`op-${s.kind}`} title={s.title}>{s.text}</span>{" "}</span>
-      ))}
-    </span>
-  );
+  return <Ops ops={item.ops} />;
 }
 
 function EditableText({ item, onSave, readOnly }: { item: Item; onSave: (t: string) => void; readOnly?: boolean }) {
@@ -81,25 +77,33 @@ function EditableText({ item, onSave, readOnly }: { item: Item; onSave: (t: stri
   }
   return (
     <span
-      className={item.text_tts ? "" : "muted"}
-      title="Nhấp đúp để sửa câu đọc"
+      className={`ellipsis ${item.text_tts ? "" : "muted"}`}
+      title={readOnly ? item.text_tts ?? item.text_raw : "Nhấp đúp để sửa câu đọc"}
       onDoubleClick={() => { if (readOnly) return; setValue(item.text_tts ?? item.text_raw); setEditing(true); }}
     >
-      {item.text_tts ?? "—"}
+      {/* A row without a reading text still shows what the sheet said, dimmed. */}
+      {item.text_tts ?? item.text_raw}
     </span>
   );
 }
 
 function PlayButton({ item }: { item: Item }) {
-  if (!item.audio_path) return <span className="muted">·</span>;
+  if (!item.audio_path) return <span className="play-slot" />;
   // The file name is the cache key (text+voice+attempt): it changes whenever the audio does.
   const version = item.audio_path.split(/[\\/]/).pop() ?? "";
   const play = () => { void new Audio(api.audioUrl(item.id, version)).play(); };
-  return <button className="icon-btn" title="Nghe audio" onClick={play}>▶</button>;
+  return <button className="icon-btn play-slot" title="Nghe audio" onClick={play}><Icon name="play" size={12} /></button>;
+}
+
+function columns(app: boolean, sheet: boolean): string {
+  return [
+    "28px", "minmax(90px, 130px)", sheet && "minmax(90px, 150px)", "minmax(180px, 1fr)", "minmax(180px, 1.2fr)",
+    "84px", "128px", !app && "52px",
+  ].filter(Boolean).join(" ");
 }
 
 export function ItemTable({
-  items, onPatch, app, selected = NONE, isSelectable = () => false, onRowSelect, onToggleAll, onRegenerate,
+  items, onPatch, app, showSheet = false, selected = NONE, isSelectable = () => false, onRowSelect, onToggleAll, onRegenerate,
 }: Props) {
   const selectable = items.filter(isSelectable);
   const picked = selectable.filter((it) => selected.has(it.id)).length;
@@ -111,10 +115,12 @@ export function ItemTable({
     overscan: 12,
     initialRect: { width: 1200, height: 600 },
   });
+  const grid = { gridTemplateColumns: columns(!!app, showSheet) };
+  const verdict = app ? "Sai" : "Audio không đạt";
 
   return (
     <div className={`table ${app ? "app" : ""}`}>
-      <div className="row head">
+      <div className="row head" style={grid}>
         <span>
           <HeadCheckbox
             checked={picked > 0 && picked === selectable.length}
@@ -123,21 +129,30 @@ export function ItemTable({
             onChange={() => onToggleAll?.()}
           />
         </span>
-        <span>#</span><span>Sheet</span><span>TC_ID</span><span>Lượt</span>
-        <span>Câu gốc</span><span>Câu đọc</span><span /><span>{app ? "Text app" : "Text STT tham chiếu"}</span>
-        <span className="num">WER</span><span className="num">CER</span><span>Trạng thái</span>{!app && <span />}
+        <span>TC_ID</span>
+        {showSheet && <span>Sheet</span>}
+        <span>Câu đọc</span>
+        <span>{app ? "Text app" : "Text STT tham chiếu"}</span>
+        <span className="num hint" title={`WER: tỉ lệ lỗi theo từ, dùng để chấm. Đạt khi WER ≤ ngưỡng, vượt ngưỡng thì ${verdict}.\nCER (số nhỏ): lỗi theo ký tự, chỉ để tham khảo. CER thấp mà WER cao thường là sai dấu.`}>
+          WER <small>CER</small>
+        </span>
+        <span>Trạng thái</span>
+        {!app && <span />}
       </div>
       <div ref={parentRef} className="table-body">
         <div style={{ height: v.getTotalSize(), position: "relative" }}>
           {v.getVirtualItems().map((vr) => {
             const it = items[vr.index];
             const ar = app?.get(it.id);
+            const wer = app ? ar?.wer : it.wer;
+            const cer = app ? ar?.cer : it.cer;
+            const rewritten = !!it.text_tts && it.text_tts !== it.text_raw;
             return (
               <div
                 key={it.id}
                 data-row
                 className={`row ${it.enabled ? "" : "disabled"}`}
-                style={{ position: "absolute", top: 0, left: 0, right: 0, height: ROW_H, transform: `translateY(${vr.start}px)` }}
+                style={{ ...grid, position: "absolute", top: 0, left: 0, right: 0, height: ROW_H, transform: `translateY(${vr.start}px)` }}
               >
                 <span>
                   <input
@@ -149,16 +164,23 @@ export function ItemTable({
                     onClick={(e) => onRowSelect?.(vr.index, e.shiftKey)}
                   />
                 </span>
-                <span className="muted">{vr.index + 1}</span>
-                <span className="ellipsis" title={it.sheet}>{it.sheet}</span>
-                <span className="ellipsis" title={it.tc_id}>{it.tc_id}</span>
-                <span>{it.turn}</span>
-                <span className="ellipsis" title={it.text_raw}>{it.text_raw}</span>
-                <span className="ellipsis cell-tts"><EditableText item={it} readOnly={!!app} onSave={(t) => onPatch(it.id, { text_tts: t })} /></span>
-                <span><PlayButton item={it} /></span>
+                <span className="cell-tc" title={`${it.sheet} · ${it.tc_id}${it.turn ? ` · lượt ${it.turn}` : ""} · dòng ${it.source_row}`}>
+                  <span className="ellipsis">{it.tc_id}</span>
+                  {/* Only later turns are marked: a plain TC_ID reads as its first (often only) turn. */}
+                  {it.turn && it.turn !== "1" && <small className="muted">·{it.turn}</small>}
+                </span>
+                {showSheet && <span className="ellipsis muted" title={it.sheet}>{it.sheet}</span>}
+                <span className="cell-tts">
+                  <PlayButton item={it} />
+                  <EditableText item={it} readOnly={!!app} onSave={(t) => onPatch(it.id, { text_tts: t })} />
+                  {rewritten && (
+                    <span className="raw-mark" title={`Câu gốc: ${it.text_raw}`} aria-label={`Câu gốc: ${it.text_raw}`}>
+                      <Icon name="pencil" size={11} />
+                    </span>
+                  )}
+                </span>
                 <span className="ellipsis">{app ? <AppText r={ar} /> : <SttText item={it} />}</span>
-                <span className="num">{formatPct(app ? ar?.wer : it.wer)}</span>
-                <span className="num">{formatPct(app ? ar?.cer : it.cer)}</span>
+                <span className="num">{formatPct(wer)}{cer != null && <small className="muted cer">{formatPct(cer)}</small>}</span>
                 <span>
                   {app ? (
                     <span className={`badge ${STATUS_CLASS[ar?.status ?? ""] ?? ""}`} title={ar?.error ?? ar?.status ?? ""}>
@@ -173,7 +195,9 @@ export function ItemTable({
                 {!app && (
                   <span className="row-actions">
                     {onRegenerate && it.audio_path && (
-                      <button className="icon-btn" title="Sinh lại audio" onClick={() => onRegenerate(it.id)}>⟳</button>
+                      <button className="icon-btn" title="Sinh lại audio" onClick={() => onRegenerate(it.id)}>
+                        <Icon name="refresh" size={13} />
+                      </button>
                     )}
                     <button
                       className={`icon-btn ${it.enabled ? "" : "off"}`}
@@ -181,7 +205,7 @@ export function ItemTable({
                       disabled={!it.text_tts}
                       onClick={() => onPatch(it.id, { enabled: !it.enabled })}
                     >
-                      ⏻
+                      <Icon name="power" size={13} />
                     </button>
                   </span>
                 )}

@@ -12,7 +12,6 @@ interface Props {
   sets: AudioSet[];
   currentSetId: number | null;
   onSelectSet: (id: number) => void;
-  onSettings: () => void;
   /** Latest /api/device poll (null until the first answer). */
   device?: DeviceStatus | null;
 }
@@ -52,8 +51,13 @@ export function adbStatus(s: DeviceStatus | null): { level: Level; label: string
 }
 
 export function Sidebar({
-  section, onSection, step2Ready, health, sets, currentSetId, onSelectSet, onSettings, device = null,
+  section, onSection, step2Ready, health, sets, currentSetId, onSelectSet, device = null,
 }: Props) {
+  const adb = adbStatus(device);
+  const stt = { level: (health?.wyoming ? "ok" : "bad") as Level, label: "STT", title: health?.wyoming
+    ? "STT tham chiếu (wyoming) sẵn sàng" : `STT tham chiếu (wyoming) chưa chạy${health?.wyoming_error ? `: ${health.wyoming_error}` : ""}` };
+  const gpu = { level: (health?.gpu ? "ok" : "warn") as Level, label: health?.gpu ? "GPU" : "CPU",
+    title: health?.gpu ? "TTS chạy GPU" : "TTS chạy CPU (chậm hơn)" };
   return (
     <aside className="sidebar">
       <div className="brand">TTS → STT<small>Automation test</small></div>
@@ -61,45 +65,71 @@ export function Sidebar({
         {NAV.map((n) => {
           const locked = n.id === "step2" && !step2Ready;
           return (
-          <button
-            key={n.id}
-            className={`nav-item ${section === n.id ? "active" : ""}`}
-            disabled={locked}
-            title={locked ? STEP2_LOCKED : undefined}
-            onClick={() => onSection(n.id)}
-          >
-            <span>{n.label}</span>
-            <small>{n.hint}</small>
-          </button>
+            <button
+              key={n.id}
+              className={`nav-item ${section === n.id ? "active" : ""}`}
+              disabled={locked}
+              title={locked ? STEP2_LOCKED : n.hint}
+              onClick={() => onSection(n.id)}
+            >
+              {n.label}
+            </button>
           );
         })}
       </nav>
 
       <div className="side-block">
         <div className="side-title">Bộ audio</div>
-        {sets.length === 0 && <div className="muted small">Chưa có — nạp file để tạo</div>}
+        {sets.length === 0 && <div className="muted small side-note">Chưa có — nạp file để tạo</div>}
         <div className="set-list">
-          {sets.map((s) => (
-            <button
-              key={s.id}
-              className={`set-item ${s.id === currentSetId ? "active" : ""}`}
-              onClick={() => onSelectSet(s.id)}
-              title={`${s.source_file} · ${s.sheets.join(", ")}`}
-            >
-              <span className="ellipsis">{s.name}</span>
-              <small>{Object.values(s.summary).reduce((a, b) => a + b, 0)} câu</small>
-            </button>
-          ))}
+          {sets.map((s) => {
+            const total = Object.values(s.summary).reduce((a, b) => a + b, 0);
+            const passed = s.summary["Đạt"] ?? 0;
+            return (
+              <button
+                key={s.id}
+                className={`set-item ${s.id === currentSetId ? "active" : ""}`}
+                onClick={() => onSelectSet(s.id)}
+                title={`${s.source_file} · ${s.sheets.join(", ")}\n${passed}/${total} câu Đạt`}
+              >
+                <span className="set-line">
+                  <span className="ellipsis">{s.name}</span>
+                  <small>{total} câu</small>
+                </span>
+                <span className="set-bar"><span style={{ width: total ? `${(passed / total) * 100}%` : 0 }} /></span>
+              </button>
+            );
+          })}
         </div>
       </div>
 
       <div className="side-footer">
-        <Dot ok={!!health?.wyoming} label="STT tham chiếu (wyoming)" title={health?.wyoming_error ?? undefined} />
-        <Dot ok={!!health?.gpu} label={health?.gpu ? "GPU" : "TTS chạy CPU"} />
-        <Dot {...adbStatus(device)} />
-        <ThemeSwitch />
-        <button className="nav-item small-btn" onClick={onSettings}>Cài đặt</button>
+        <div className="status-row">
+          <StatusChip {...stt} />
+          <StatusChip {...gpu} />
+          <StatusChip level={adb.level} title={adb.title ?? adb.label} label={adbShort(device)} />
+          <span className="spacer" />
+          <ThemeSwitch />
+        </div>
+        {/* Spell out only what needs the user: STT blocks Verify; a plugged-in phone waiting for permission. */}
+        {stt.level !== "ok" && <Dot level="bad" label="STT tham chiếu chưa chạy" title={stt.title} />}
+        {adb.level === "warn" && <Dot {...adb} />}
       </div>
     </aside>
   );
+}
+
+function StatusChip({ level, label, title }: { level: Level; label: string; title?: string }) {
+  return (
+    <span className="status-chip" title={title}>
+      <span className={`dot ${level}`} />
+      <span className="ellipsis">{label}</span>
+    </span>
+  );
+}
+
+/** Chip text for ADB: the phone's name when there is one. */
+function adbShort(s: DeviceStatus | null): string {
+  const d = s?.devices.find((x) => x.state === "device") ?? s?.devices[0];
+  return d ? d.model ?? d.serial : "ADB";
 }

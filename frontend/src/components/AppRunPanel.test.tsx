@@ -25,9 +25,20 @@ describe("AppRunPanel", () => {
     render(<AppRunPanel {...panel({ passedCount: 0 })} />);
     expect((screen.getByText("Chạy trên app (tất cả)") as HTMLButtonElement).disabled).toBe(true);
   });
-  it("shows app accuracy of the selected run", () => {
-    render(<AppRunPanel {...panel({ runs: [run], runId: 7 })} />);
-    expect(screen.getByText(/Đúng 75%/)).toBeTruthy();
+  it("asks for the device only when several phones are connected", () => {
+    const { rerender } = render(<AppRunPanel {...panel()} />);
+    expect(screen.queryByRole("combobox", { name: "Thiết bị" })).toBeNull();
+    const onStart = vi.fn();
+    rerender(<AppRunPanel {...panel({ devices: [device, { serial: "T", state: "device", model: "N" }], onStart })} />);
+    fireEvent.change(screen.getByRole("combobox", { name: "Thiết bị" }), { target: { value: "T" } });
+    fireEvent.click(screen.getByText("Chạy trên app (tất cả)"));
+    expect(onStart).toHaveBeenCalledWith("T", "Vita Work (dev)");
+  });
+  it("offers resume for the cases left over", () => {
+    const onResume = vi.fn();
+    render(<AppRunPanel {...panel({ runs: [run], runId: 7, onResume })} />);
+    fireEvent.click(screen.getByText("Chạy tiếp (1)"));
+    expect(onResume).toHaveBeenCalledWith(7);
   });
   it("run label follows the selection", () => {
     const onStart = vi.fn();
@@ -39,11 +50,12 @@ describe("AppRunPanel", () => {
     const onExportForm = vi.fn();
     const onExportZip = vi.fn();
     const { rerender } = render(<AppRunPanel {...panel()} />);
-    expect((screen.getByText("Xuất Excel (form)") as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByText("Xuất zip phiên") as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Xuất" }) as HTMLButtonElement).disabled).toBe(true);
     rerender(<AppRunPanel {...panel({ runs: [run], runId: 7, onExportForm, onExportZip })} />);
-    fireEvent.click(screen.getByText("Xuất Excel (form)"));
-    fireEvent.click(screen.getByText("Xuất zip phiên"));
+    fireEvent.click(screen.getByRole("button", { name: "Xuất" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Excel theo form/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Xuất" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Zip phiên/ }));
     expect(onExportForm).toHaveBeenCalled();
     expect(onExportZip).toHaveBeenCalled();
   });
