@@ -13,6 +13,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from tts_stt_tool.config import Settings
+from tts_stt_tool.device.adb import Adb
 from tts_stt_tool.jobs.runner import JobRunner
 from tts_stt_tool.store.db import Store
 from tts_stt_tool.stt.server_manager import REPO_ROOT, WyomingServerManager, default_wyoming_launch
@@ -36,6 +37,7 @@ class AppContext:
     voices: list[VoiceInfo] | None = None
     wyoming_error: str | None = None
     background: set = field(default_factory=set)
+    adb: Adb = field(default_factory=Adb)
 
     @property
     def uploads(self) -> Path:

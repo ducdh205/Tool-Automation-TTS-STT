@@ -28,6 +28,14 @@ export interface Settings {
 export interface Health { wyoming: boolean; wyoming_error: string | null; gpu: boolean; job: Job | null }
 export interface Job { id: string; name: string; done: number; total: number }
 export interface Voice { id: string; label: string }
+export interface DeviceInfo { serial: string; state: string; model: string | null }
+export type DeviceKey = "back" | "home" | "recents" | "enter" | "del" | "power" | "volup" | "voldown";
+export type DeviceInputBody =
+  | { action: "tap"; x: number; y: number }
+  | { action: "swipe"; x: number; y: number; x2: number; y2: number; duration_ms?: number }
+  | { action: "key"; key: DeviceKey }
+  | { action: "text"; text: string };
+export interface DeviceStatus { adb: boolean; error: string | null; devices: DeviceInfo[] }
 
 export interface ProgressEvent {
   job_id: string; kind: "item" | "progress" | "done" | "error" | "cancelled";
@@ -51,6 +59,9 @@ async function req<T>(method: string, url: string, body?: unknown): Promise<T> {
 }
 
 export const api = {
+  device: () => req<DeviceStatus>("GET", "/api/device"),
+  deviceInput: (serial: string, b: DeviceInputBody) =>
+    req<{ ok: boolean }>("POST", `/api/device/${encodeURIComponent(serial)}/input`, b),
   inspect(file: File) {
     const fd = new FormData();
     fd.append("file", file);

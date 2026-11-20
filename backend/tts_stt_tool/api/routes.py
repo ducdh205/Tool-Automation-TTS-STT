@@ -10,11 +10,12 @@ from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from tts_stt_tool.api.app import AppContext
 from tts_stt_tool.config import save_settings
+from tts_stt_tool.device.adb import KEYS, AdbError
 from tts_stt_tool.input.filters import clean_text, has_words
 from tts_stt_tool.input.generic import ColumnMapping, preview_columns, read_generic
 from tts_stt_tool.input.testcase_form import InputError, list_sheets, read_testcase_items
@@ -253,6 +254,65 @@ def _gpu_available() -> bool:
         return bool(torch.cuda.is_available())
     except Exception:
         return False
+
+
+# -- device -------------------------------------------------------------------
+@router.get("/device")
+async def device_status(request: Request) -> dict[str, Any]:
+    adb = ctx_of(request).adb
+    if not adb.available:
+        return {"adb": False, "error": "Không tìm thấy adb", "devices": []}
+    try:
+        devices = await adb.devices()
+    except AdbError as e:
+        return {"adb": True, "error": str(e), "devices": []}
+    return {"adb": True, "error": None, "devices": [d.to_json() for d in devices]}
+
+
+@router.get("/device/{serial}/screen")
+async def device_screen(request: Request, serial: str) -> Response:
+    try:
+        png = await ctx_of(request).adb.screencap(serial)
+    except AdbError as e:
+        raise HTTPException(503, str(e)) from e
+    return Response(png, media_type="image/png", headers={"Cache-Control": "no-store"})
+
+
+class DeviceInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    action: Literal["tap", "swipe", "key", "text"]
+    x: int | None = Field(None, ge=0)
+    y: int | None = Field(None, ge=0)
+    x2: int | None = Field(None, ge=0)
+    y2: int | None = Field(None, ge=0)
+    duration_ms: int = Field(300, ge=1, le=5000)
+    key: str | None = None
+    text: str | None = Field(None, max_length=500)
+
+
+@router.post("/device/{serial}/input")
+async def device_input(request: Request, serial: str, body: DeviceInput) -> dict[str, bool]:
+    adb = ctx_of(request).adb
+    try:
+        if body.action == "tap":
+            if body.x is None or body.y is None:
+                raise HTTPException(422, "Thiếu toạ độ")
+            await adb.tap(serial, body.x, body.y)
+        elif body.action == "swipe":
+            if None in (body.x, body.y, body.x2, body.y2):
+                raise HTTPException(422, "Thiếu toạ độ")
+            await adb.swipe(serial, body.x, body.y, body.x2, body.y2, body.duration_ms)
+        elif body.action == "key":
+            if body.key not in KEYS:
+                raise HTTPException(422, "Phím không hỗ trợ")
+            await adb.key(serial, KEYS[body.key])
+        else:
+            if not body.text:
+                raise HTTPException(422, "Thiếu nội dung")
+            await adb.text(serial, body.text)
+    except AdbError as e:
+        raise HTTPException(503, str(e)) from e
+    return {"ok": True}
 
 
 @router.get("/health")
