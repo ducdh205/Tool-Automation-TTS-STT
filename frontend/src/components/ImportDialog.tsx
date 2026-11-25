@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type DragEvent } from "react";
 import { api, type InspectResult, type MappingField, type SheetPreview } from "../api";
 
 interface Props {
@@ -93,6 +93,40 @@ export function ImportDialog({ onClose, onCreated }: Props) {
     }
   };
 
+  const [dragging, setDragging] = useState(false);
+  const dragDepth = useRef(0);
+  const hasFiles = (e: DragEvent) => Array.from(e.dataTransfer.types).includes("Files");
+  const onDragEnter = (e: DragEvent) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    dragDepth.current += 1;
+    setDragging(true);
+  };
+  const onDragOver = (e: DragEvent) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+  };
+  const onDragLeave = (e: DragEvent) => {
+    if (!hasFiles(e)) return;
+    dragDepth.current = Math.max(0, dragDepth.current - 1);
+    if (dragDepth.current === 0) setDragging(false);
+  };
+  const onDrop = (e: DragEvent) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    dragDepth.current = 0;
+    setDragging(false);
+    if (busy) return;
+    const f = e.dataTransfer.files?.[0];
+    if (!f) return;
+    if (!/\.(xlsx|xlsm|csv)$/i.test(f.name)) {
+      setError(`File "${f.name}" không hợp lệ — chỉ hỗ trợ .xlsx, .xlsm hoặc .csv`);
+      return;
+    }
+    onFile(f);
+  };
+
   const setField = (key: MappingField, value: string) => {
     touched.current.add(key);
     setMapping((m) => ({ ...m, [key]: value }));
@@ -148,7 +182,11 @@ export function ImportDialog({ onClose, onCreated }: Props) {
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal import-modal" onClick={(e) => e.stopPropagation()}>
+      <div
+        className={`modal import-modal${dragging ? " dragging" : ""}`}
+        onClick={(e) => e.stopPropagation()}
+        onDragEnter={onDragEnter} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}
+      >
         <header>
           <div>
             <div className="import-eyebrow">NHẬP DỮ LIỆU TESTCASE</div>
@@ -158,15 +196,15 @@ export function ImportDialog({ onClose, onCreated }: Props) {
         </header>
 
         {!info && (
-          <label className="file-drop">
+          <label className={`file-drop${dragging ? " active" : ""}`}>
             <input type="file" accept=".xlsx,.xlsm,.csv" onChange={(e) => onFile(e.target.files?.[0])} />
-            <span>Chọn file .xlsx hoặc .csv</span>
+            <span>{busy ? "Đang đọc file…" : dragging ? "Thả file vào đây" : "Kéo thả file vào đây hoặc bấm để chọn (.xlsx, .csv)"}</span>
           </label>
         )}
         {info && (
           <label className="import-change muted small">
             <input type="file" accept=".xlsx,.xlsm,.csv" hidden onChange={(e) => onFile(e.target.files?.[0])} />
-            <span className="link-btn">Đổi file khác</span>
+            <span className="link-btn">Đổi file khác</span> <span>(hoặc kéo thả file mới vào)</span>
           </label>
         )}
 

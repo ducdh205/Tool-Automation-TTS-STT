@@ -302,6 +302,8 @@ nav { display: flex; flex-direction: column; gap: 2px; }
 .file-drop { border: 1.5px dashed var(--border); border-radius: 10px; padding: 18px; display: flex; justify-content: center; cursor: pointer; }
 .file-drop input { display: none; }
 .file-drop:hover { border-color: var(--accent); }
+.file-drop.active { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.import-modal.dragging { outline: 2px dashed var(--accent); outline-offset: -6px; }
 .row-between { display: flex; justify-content: space-between; align-items: center; }
 .link-btn { border: 0; background: none; color: var(--accent); cursor: pointer; }
 .sheet-list { overflow: auto; border: 1px solid var(--border); border-radius: 8px; max-height: 320px; }
