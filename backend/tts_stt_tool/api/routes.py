@@ -397,12 +397,15 @@ class SettingsIn(BaseModel):
     stt_timeout_s: float = Field(gt=0, le=600)
     wyoming_cmd: list[str] = []
     port: int = Field(ge=1, le=65535)
+    # Echoed back by the settings form; ignored here — CPU/GPU changes go through PUT /api/tts/device,
+    # which checks CUDA first.
+    tts_device: str | None = None
 
 
 @router.put("/settings")
 def put_settings(request: Request, body: SettingsIn) -> dict[str, Any]:
     ctx = ctx_of(request)
-    for k, v in body.model_dump().items():
+    for k, v in body.model_dump(exclude={"tts_device"}).items():
         setattr(ctx.settings, k, v)
     save_settings(ctx.settings)
     if isinstance(ctx.stt, WyomingStt):  # apply without restart
