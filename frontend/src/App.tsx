@@ -292,6 +292,27 @@ export default function App() {
     }
   };
 
+  const exportSet = async (id: number) => {
+    try {
+      await api.exportSet(id);
+    } catch (e) {
+      notify((e as Error).message, "error");
+    }
+  };
+
+  const importSet = async (file: File) => {
+    try {
+      const r = await api.importSet(file);
+      await loadSets();
+      setSetId(r.id);
+      notify(r.missing_audio > 0
+        ? `Đã nạp bộ audio. ${r.missing_audio} câu thiếu audio, cần sinh lại.`
+        : "Đã nạp bộ audio.");
+    } catch (e) {
+      notifyError(e);
+    }
+  };
+
   const clearAll = async () => {
     try {
       const { sets: n } = await api.clearAllData();
@@ -359,8 +380,10 @@ export default function App() {
         currentSetId={setId}
         onSelectSet={setSetId}
         onDeleteSet={deleteSet}
+        onExportSet={exportSet}
+        onImportSet={importSet}
         onClearAll={clearAll}
-        deleteLocked={job ? `Đang chạy: ${job.name} — dừng job trước khi xóa` : null}
+        deleteLocked={job ? `Đang chạy: ${job.name} — dừng job trước khi xóa, xuất hoặc nạp bộ audio` : null}
         device={deviceStatus}
       />
       <main className="center">

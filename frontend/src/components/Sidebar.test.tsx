@@ -134,3 +134,47 @@ describe("Sidebar clear all data", () => {
     expect(screen.queryByRole("button", { name: "Xóa toàn bộ dữ liệu" })).toBeNull();
   });
 });
+
+describe("Sidebar export / import", () => {
+  const set = { id: 3, name: "E2E Climate Sync", source_file: "f.xlsx", sheets: ["S1"], voice: null,
+    created_at: "", summary: { "Đạt": 1, "Chờ": 260 } };
+  const base = { section: "step1" as const, step2Ready: true, onSection: () => {}, health: null,
+    sets: [set], currentSetId: 3, onSelectSet: () => {} };
+
+  it("exports a set without asking for confirmation", () => {
+    const onExportSet = vi.fn();
+    const confirm = vi.spyOn(window, "confirm");
+    render(<Sidebar {...base} onExportSet={onExportSet} />);
+    fireEvent.click(screen.getByRole("button", { name: "Xuất bộ E2E Climate Sync" }));
+    expect(onExportSet).toHaveBeenCalledWith(3);
+    expect(confirm).not.toHaveBeenCalled();
+  });
+
+  it("imports the zip the user picks, and lets the same file be picked again", () => {
+    const onImportSet = vi.fn();
+    const { container } = render(<Sidebar {...base} onImportSet={onImportSet} />);
+    expect(screen.getByRole("button", { name: "Nạp bộ audio" })).toBeTruthy();
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    expect(input.accept).toBe(".zip");
+    const file = new File(["x"], "bo.zip");
+    fireEvent.change(input, { target: { files: [file] } });
+    expect(onImportSet).toHaveBeenCalledWith(file);
+    expect(input.value).toBe("");
+  });
+
+  it("locks export and import while a job runs", () => {
+    render(<Sidebar {...base} onExportSet={() => {}} onImportSet={() => {}} deleteLocked="Đang chạy job" />);
+    for (const name of ["Xuất bộ E2E Climate Sync", "Nạp bộ audio"]) {
+      const btn = screen.getByRole("button", { name }) as HTMLButtonElement;
+      expect(btn.disabled).toBe(true);
+      expect(btn.title).toBe("Đang chạy job");
+    }
+  });
+
+  it("hides export and import without handlers", () => {
+    const { container } = render(<Sidebar {...base} />);
+    expect(screen.queryByRole("button", { name: "Xuất bộ E2E Climate Sync" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Nạp bộ audio" })).toBeNull();
+    expect(container.querySelector('input[type="file"]')).toBeNull();
+  });
+});

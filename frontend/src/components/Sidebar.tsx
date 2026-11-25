@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import type { AudioSet, DeviceStatus, Health } from "../api";
 import { Icon } from "./Icon";
 import { ThemeSwitch } from "./ThemeSwitch";
@@ -15,6 +16,10 @@ interface Props {
   onSelectSet: (id: number) => void;
   /** Called once the user confirmed deleting a set; omit to hide the delete buttons. */
   onDeleteSet?: (id: number) => void;
+  /** Called when the user asks to export a set as a zip; omit to hide the export buttons. */
+  onExportSet?: (id: number) => void;
+  /** Called with the zip the user picked; omit to hide the import button. */
+  onImportSet?: (file: File) => void;
   /** Called once the user confirmed wiping all output data; omit to hide the button. */
   onClearAll?: () => void;
   /** Why deleting is not possible now (a job is running): the buttons are disabled with this tooltip. */
@@ -58,10 +63,11 @@ export function adbStatus(s: DeviceStatus | null): { level: Level; label: string
 }
 
 export function Sidebar({
-  section, onSection, step2Ready, health, sets, currentSetId, onSelectSet, onDeleteSet, onClearAll, deleteLocked = null,
-  device = null,
+  section, onSection, step2Ready, health, sets, currentSetId, onSelectSet, onDeleteSet, onExportSet, onImportSet,
+  onClearAll, deleteLocked = null, device = null,
 }: Props) {
   const adb = adbStatus(device);
+  const importInput = useRef<HTMLInputElement>(null);
   const stt = { level: (health?.wyoming ? "ok" : "bad") as Level, label: "STT", title: health?.wyoming
     ? "STT tham chiếu (wyoming) sẵn sàng" : `STT tham chiếu (wyoming) chưa chạy${health?.wyoming_error ? `: ${health.wyoming_error}` : ""}` };
   const gpu = { level: (health?.gpu ? "ok" : "warn") as Level, label: health?.gpu ? "GPU" : "CPU",
@@ -89,24 +95,51 @@ export function Sidebar({
       <div className="side-block">
         <div className="side-title-row">
           <div className="side-title">Bộ audio</div>
-          {onClearAll && (
-            <button
-              className="icon-btn clear-all"
-              aria-label="Xóa toàn bộ dữ liệu"
-              title={deleteLocked ?? "Xóa toàn bộ dữ liệu output"}
-              disabled={!!deleteLocked}
-              onClick={() => {
-                if (window.confirm(`Xóa toàn bộ dữ liệu output (${sets.length} bộ audio)?\n\n`
-                  + "Audio đã sinh, các lần test app, ảnh chụp màn hình, báo cáo và file đã nạp sẽ bị xóa, "
-                  + "không hoàn tác được.\nCài đặt và hồ sơ app được giữ lại.")) {
-                  onClearAll();
-                }
-              }}
-            >
-              <Icon name="trash" size={13} />
-              <span>Xóa tất cả</span>
-            </button>
-          )}
+          <div className="side-actions">
+            {onImportSet && (
+              <>
+                <button
+                  className="icon-btn side-action"
+                  aria-label="Nạp bộ audio"
+                  title={deleteLocked ?? "Nạp bộ audio từ file .zip đã xuất"}
+                  disabled={!!deleteLocked}
+                  onClick={() => importInput.current?.click()}
+                >
+                  <Icon name="upload" size={13} />
+                  <span>Nạp</span>
+                </button>
+                <input
+                  ref={importInput}
+                  type="file"
+                  accept=".zip"
+                  hidden
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    e.target.value = ""; // the same file can be picked again
+                    if (file) onImportSet(file);
+                  }}
+                />
+              </>
+            )}
+            {onClearAll && (
+              <button
+                className="icon-btn clear-all"
+                aria-label="Xóa toàn bộ dữ liệu"
+                title={deleteLocked ?? "Xóa toàn bộ dữ liệu output"}
+                disabled={!!deleteLocked}
+                onClick={() => {
+                  if (window.confirm(`Xóa toàn bộ dữ liệu output (${sets.length} bộ audio)?\n\n`
+                    + "Audio đã sinh, các lần test app, ảnh chụp màn hình, báo cáo và file đã nạp sẽ bị xóa, "
+                    + "không hoàn tác được.\nCài đặt và hồ sơ app được giữ lại.")) {
+                    onClearAll();
+                  }
+                }}
+              >
+                <Icon name="trash" size={13} />
+                <span>Xóa tất cả</span>
+              </button>
+            )}
+          </div>
         </div>
         {sets.length === 0 && <div className="muted small side-note">Chưa có — nạp file để tạo</div>}
         <div className="set-list">
@@ -126,6 +159,17 @@ export function Sidebar({
                   </span>
                   <span className="set-bar"><span style={{ width: total ? `${(passed / total) * 100}%` : 0 }} /></span>
                 </button>
+                {onExportSet && (
+                  <button
+                    className="icon-btn set-export"
+                    aria-label={`Xuất bộ ${s.name}`}
+                    title={deleteLocked ?? "Xuất bộ audio ra file .zip"}
+                    disabled={!!deleteLocked}
+                    onClick={() => onExportSet(s.id)}
+                  >
+                    <Icon name="download" size={14} />
+                  </button>
+                )}
                 {onDeleteSet && (
                   <button
                     className="icon-btn set-delete"

@@ -103,6 +103,19 @@ export const api = {
   sets: () => req<AudioSet[]>("GET", "/api/audio-sets"),
   /** Also removes its app runs, screenshots and WAVs no other set uses; 409 while a job runs. */
   deleteSet: (setId: number) => req<{ ok: boolean }>("DELETE", `/api/audio-sets/${setId}`),
+  /** Zip with the set's rows, verify state and WAVs; the server builds it, the browser follows a one-time link. 409 while a job runs. */
+  async exportSet(setId: number) {
+    const r = await req<{ download_url: string }>("POST", `/api/audio-sets/${setId}/export`);
+    const a = document.createElement("a");
+    a.href = r.download_url;
+    a.click();
+  },
+  /** Loads a zip from `exportSet` as a NEW set; `missing_audio` rows had no WAV and went back to "Chờ". 422 = not a valid zip. */
+  importSet(file: File) {
+    const fd = new FormData();
+    fd.append("file", file);
+    return req<{ id: number; missing_audio: number }>("POST", "/api/audio-sets/import", fd);
+  },
   /** Every set + its WAVs, app runs, screenshots, reports and uploads; keeps settings and profiles. 409 while a job runs. */
   clearAllData: () => req<{ ok: boolean; sets: number }>("DELETE", "/api/data"),
   items: (setId: number) => req<Item[]>("GET", `/api/audio-sets/${setId}/items`),

@@ -154,3 +154,46 @@ it("clears all data and leaves no set open", async () => {
   expect(screen.queryByText("Bộ A")).toBeNull();
   expect(await screen.findByText(/Đã xóa toàn bộ dữ liệu/)).toBeTruthy();
 });
+
+it("opens the imported audio set and warns about sentences without audio", async () => {
+  const mk = (id: number, name: string) => ({ id, name, source_file: "f.xlsx", sheets: ["S1"], voice: null,
+    created_at: "", summary: { "Chờ": 1 } });
+  vi.spyOn(api, "profiles").mockResolvedValue([]);
+  vi.spyOn(api, "device").mockResolvedValue({ adb: false, devices: [], error: null });
+  const sets = vi.spyOn(api, "sets").mockResolvedValue([mk(2, "Bộ B")]);
+  vi.spyOn(api, "currentJob").mockResolvedValue(null);
+  vi.spyOn(api, "health").mockResolvedValue({ wyoming: true, wyoming_error: null, gpu: true, job: null });
+  vi.spyOn(api, "settings").mockResolvedValue(settings);
+  vi.spyOn(api, "appRuns").mockResolvedValue([]);
+  const items = vi.spyOn(api, "items").mockResolvedValue([]);
+  const imp = vi.spyOn(api, "importSet").mockResolvedValue({ id: 9, missing_audio: 2 });
+
+  const { container } = render(<App />);
+  await waitFor(() => expect(items).toHaveBeenCalledWith(2));
+  sets.mockResolvedValue([mk(9, "Bộ mới"), mk(2, "Bộ B")]);
+  const file = new File(["x"], "bo.zip");
+  fireEvent.change(container.querySelector('input[type="file"][accept=".zip"]') as HTMLInputElement,
+    { target: { files: [file] } });
+
+  await waitFor(() => expect(imp).toHaveBeenCalledWith(file));
+  await waitFor(() => expect(items).toHaveBeenCalledWith(9));
+  expect(await screen.findByText(/2 câu thiếu audio/)).toBeTruthy();
+});
+
+it("exports a set from the sidebar", async () => {
+  const mk = (id: number, name: string) => ({ id, name, source_file: "f.xlsx", sheets: ["S1"], voice: null,
+    created_at: "", summary: { "Chờ": 1 } });
+  vi.spyOn(api, "profiles").mockResolvedValue([]);
+  vi.spyOn(api, "device").mockResolvedValue({ adb: false, devices: [], error: null });
+  vi.spyOn(api, "sets").mockResolvedValue([mk(2, "Bộ B")]);
+  vi.spyOn(api, "currentJob").mockResolvedValue(null);
+  vi.spyOn(api, "health").mockResolvedValue({ wyoming: true, wyoming_error: null, gpu: true, job: null });
+  vi.spyOn(api, "settings").mockResolvedValue(settings);
+  vi.spyOn(api, "appRuns").mockResolvedValue([]);
+  vi.spyOn(api, "items").mockResolvedValue([]);
+  const exp = vi.spyOn(api, "exportSet").mockResolvedValue();
+
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Xuất bộ Bộ B" }));
+  await waitFor(() => expect(exp).toHaveBeenCalledWith(2));
+});
