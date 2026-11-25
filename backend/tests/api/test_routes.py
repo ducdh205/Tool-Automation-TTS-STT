@@ -452,3 +452,11 @@ def test_delete_set_and_clear_all_remove_sources(client, tmp_path):
     assert (ctx.sources / str(second)).is_dir()
     assert client.delete("/api/data").status_code == 200
     assert not any(ctx.sources.iterdir())
+
+
+def test_put_settings_ignores_tts_device(client):
+    s = client.get("/api/settings").json()
+    assert s["tts_device"] == "cpu"
+    r = client.put("/api/settings", json={**s, "tts_device": "cuda"})
+    assert r.status_code == 200, r.text
+    assert r.json()["tts_device"] == "cpu"

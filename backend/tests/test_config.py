@@ -41,3 +41,11 @@ def test_mutable_defaults_not_shared(tmp_path):
     b = Settings(data_dir=tmp_path)
     a.wyoming_cmd.append("x")
     assert b.wyoming_cmd == []
+
+
+def test_tts_device_default_and_roundtrip(tmp_path):
+    s = load_settings(tmp_path)
+    assert s.tts_device == "cpu"
+    s.tts_device = "cuda"
+    save_settings(s)
+    assert load_settings(tmp_path).tts_device == "cuda"
