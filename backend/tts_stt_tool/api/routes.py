@@ -28,7 +28,7 @@ from tts_stt_tool.jobs.runner import JobBusyError
 from tts_stt_tool.pipeline.block1 import run_generate, run_verify
 from tts_stt_tool.pipeline.block2 import run_block2
 from tts_stt_tool.report.excel import build_block1_report, export_block1_csv
-from tts_stt_tool.report.form_export import build_form_report
+from tts_stt_tool.report.result_export import build_result_report, result_suffix
 from tts_stt_tool.report.session_zip import build_session_zip, session_root_name
 from tts_stt_tool.store.db import ItemStatus
 from tts_stt_tool.stt.wyoming_client import WyomingStt
@@ -37,6 +37,7 @@ from tts_stt_tool.tts.speed import MAX_SPEED, MIN_SPEED
 
 router = APIRouter()
 XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+XLSM_TYPE = "application/vnd.ms-excel.sheet.macroEnabled.12"
 VOICE_PREVIEW_TEXT = "Xin chào, bạn muốn bật quạt hay điều chỉnh nhiệt độ?"
 
 
@@ -625,9 +626,10 @@ def _run_file_base(ctx: AppContext, run: dict[str, Any]) -> str:
 async def form_report(request: Request, run_id: int) -> FileResponse:
     ctx = ctx_of(request)
     run = _require_run(ctx, run_id)
-    out = ctx.reports / f"KetQua_{_run_file_base(ctx, run)}.xlsx"
-    await asyncio.to_thread(build_form_report, ctx.store, run_id, out)
-    return FileResponse(out, media_type=XLSX_TYPE, filename=out.name)
+    suffix = result_suffix(ctx.store.get_audio_set(run["audio_set_id"]) or {})
+    out = ctx.reports / f"KetQua_{_run_file_base(ctx, run)}{suffix}"
+    await asyncio.to_thread(build_result_report, ctx.store, run_id, out)
+    return FileResponse(out, media_type=XLSM_TYPE if suffix == ".xlsm" else XLSX_TYPE, filename=out.name)
 
 
 class ExportZipIn(BaseModel):

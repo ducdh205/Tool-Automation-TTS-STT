@@ -1,5 +1,7 @@
+import io
 from pathlib import Path
 
+import openpyxl
 import pytest
 from fastapi.testclient import TestClient
 
@@ -158,7 +160,9 @@ def test_form_report_endpoint(ctx):
     r = c.post(f"/api/app-runs/{run_id}/form-report")
     assert r.status_code == 200, r.text
     assert "spreadsheetml" in r.headers["content-type"]
+    assert "KetQua_" in r.headers["content-disposition"]
     assert f"Phien{run_id}.xlsx" in r.headers["content-disposition"]
+    assert openpyxl.load_workbook(io.BytesIO(r.content)).sheetnames[0] == "Tổng hợp phiên"
     assert c.post("/api/app-runs/999/form-report").status_code == 404
 
 
