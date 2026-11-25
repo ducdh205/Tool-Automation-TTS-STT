@@ -62,3 +62,11 @@ tuân theo mẫu form 36 cột.
 ## Để người làm tự quyết
 
 Cách tìm "cột cuối" khi header có ô gộp, tên hàm/biến, bố cục test.
+
+## Bổ sung 2026-11-26: cột Ảnh màn hình
+
+- Cột thứ 4 **Ảnh màn hình** sau Ghi chú (rộng 22), cả file gốc lẫn bảng đơn giản, cả trong zip phiên.
+- Câu Fail / Lỗi thao tác có `screenshot_path`: nhúng ảnh thu nhỏ cao 240px (giữ tỉ lệ, JPEG) neo ở ô đó;
+  dòng có ảnh nới chiều cao cho vừa (chỗ duy nhất đổi định dạng gốc). File ảnh mất / không đọc được →
+  chữ "(không tìm thấy ảnh)". Pass / chưa test / không có ảnh → trống.
+- Đã loại: link tới ảnh trong zip (hỏng khi mở Excel riêng), nhúng ảnh gốc (file quá nặng).
