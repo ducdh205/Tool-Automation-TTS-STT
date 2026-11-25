@@ -70,9 +70,9 @@ def test_app_run_end_to_end(ctx):
     wait_job_end(c)
 
 
-def test_app_run_needs_verified_items(ctx):
+def test_app_run_needs_generated_audio(ctx):
     c, _, _, tmp_path = ctx
-    set_id = create_set(c, tmp_path)  # block 1 not run: nothing Đạt
+    set_id = create_set(c, tmp_path)  # block 1 not run: no audio
     r = c.post(f"/api/audio-sets/{set_id}/app-runs", json={"serial": "SER", "profile": "Vita Work (dev)"})
     assert r.status_code == 422
 
@@ -132,14 +132,15 @@ def test_app_run_on_selected_items_saves_shots(ctx):
     assert shot.is_file() and shot.parent == app.state.ctx.run_dir(run_id).resolve()
 
 
-def test_app_run_selection_without_passed_items_is_422(ctx):
+def test_app_run_selection_without_audio_is_422(ctx):
     c, _, _, tmp_path = ctx
     name = fast_profile(c)
     set_id = verified_set(c, tmp_path)
-    skipped = [i["id"] for i in c.get(f"/api/audio-sets/{set_id}/items").json() if i["status"] != "Đạt"]
+    skipped = [i["id"] for i in c.get(f"/api/audio-sets/{set_id}/items").json() if not i["audio_path"]]
+    assert skipped
     runs_before = len(c.get(f"/api/audio-sets/{set_id}/app-runs").json())
     r = c.post(f"/api/audio-sets/{set_id}/app-runs", json={"serial": "SER", "profile": name, "item_ids": skipped})
-    assert r.status_code == 422 and r.json()["detail"] == "Không có câu Đạt nào trong các case đã chọn"
+    assert r.status_code == 422 and r.json()["detail"] == "Không có câu nào có audio trong các case đã chọn"
     assert len(c.get(f"/api/audio-sets/{set_id}/app-runs").json()) == runs_before
 
 
@@ -246,3 +247,15 @@ def test_clear_all_data_removes_outputs_and_keeps_settings(ctx):
     # the tool keeps working: a new set can be generated into the emptied audio cache
     new_id = create_set(c, tmp_path)
     verify_all(c, new_id)
+
+
+def test_profile_between_delay(ctx):
+    c, *_ = ctx
+    p = c.get("/api/profiles").json()[0]
+    assert p["between_delay_s"] == 0
+    assert c.put(f"/api/profiles/{p['name']}", json=p | {"between_delay_s": 3}).status_code == 200
+    assert next(x for x in c.get("/api/profiles").json() if x["name"] == p["name"])["between_delay_s"] == 3
+    assert c.put(f"/api/profiles/{p['name']}", json=p | {"between_delay_s": -1}).status_code == 422
+    assert c.put(f"/api/profiles/{p['name']}", json=p | {"between_delay_s": 61}).status_code == 422
+    old = {k: v for k, v in p.items() if k != "between_delay_s"}  # older clients omit the field
+    assert c.put(f"/api/profiles/{p['name']}", json=old).status_code == 200

@@ -1,4 +1,4 @@
-"""Block 2: speak each verified sentence to the real app and read what it heard."""
+"""Block 2: speak each generated sentence (verified or not) to the real app and read what it heard."""
 
 from __future__ import annotations
 
@@ -257,6 +257,16 @@ async def _run_one(dev: DeviceDriver, p: AppProfile, wav: Path, player: AudioPla
 MAX_CONSECUTIVE_OP_ERRORS = 5
 
 
+async def pause_unless_cancelled(seconds: float, cancel: asyncio.Event) -> None:
+    """Wait ``seconds``, returning early as soon as the run is cancelled."""
+    if seconds <= 0:
+        return
+    try:
+        await asyncio.wait_for(cancel.wait(), timeout=seconds)
+    except TimeoutError:
+        pass
+
+
 async def run_block2(
     store: Store,
     app_run_id: int,
@@ -268,8 +278,12 @@ async def run_block2(
     cancel: asyncio.Event,
     run_one: Callable[..., Awaitable[AppCapture]] = run_one,
     shots_dir: Path | None = None,
+    pause: Callable[[float, asyncio.Event], Awaitable[None]] = pause_unless_cancelled,
 ) -> None:
-    """Run every pending sentence; with ``shots_dir``, failures leave a ``<result id>.png`` there."""
+    """Run every pending sentence; with ``shots_dir``, failures leave a ``<result id>.png`` there.
+
+    ``profile.between_delay_s`` separates two sentences (not before the first, not after the last).
+    """
 
     def save_shot(result_id: int, png: bytes | None, log: list[str]) -> str | None:
         if png is None or shots_dir is None:
@@ -287,6 +301,8 @@ async def run_block2(
     total = len(todo)
     op_errors = 0
     for done, row in enumerate(todo):
+        if done and profile.between_delay_s > 0 and not cancel.is_set():
+            await pause(profile.between_delay_s, cancel)
         if cancel.is_set():
             emit(ProgressEvent("", "cancelled", done, total))
             return

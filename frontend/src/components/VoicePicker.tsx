@@ -14,12 +14,14 @@ interface Props {
   values: Record<VoiceField, string>;
   saved: Record<VoiceField, string>;
   disabled: boolean;
+  /** Speed the preview is spoken at (the unsaved draft, so the user hears it before saving). */
+  speed?: number;
   onChange: (field: VoiceField, voice: string) => void;
 }
 
 const regionOf = (v: Voice) => v.label.split("·")[1]?.trim();
 
-export function VoicePicker({ values, saved, disabled, onChange }: Props) {
+export function VoicePicker({ values, saved, disabled, speed = 1, onChange }: Props) {
   const [voices, setVoices] = useState<Voice[]>([]);
   const [voiceStatus, setVoiceStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [previewStatus, setPreviewStatus] = useState<"idle" | "loading" | "playing" | "error">("idle");
@@ -55,7 +57,7 @@ export function VoicePicker({ values, saved, disabled, onChange }: Props) {
     const wasPlaying = preview.current !== null && previewField === field;
     stopPreview();
     if (wasPlaying) return;
-    const audio = new Audio(api.voicePreviewUrl(values[field]));
+    const audio = new Audio(api.voicePreviewUrl(values[field], speed));
     preview.current = audio;
     setPreviewField(field);
     setPreviewStatus("loading");

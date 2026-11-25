@@ -9,7 +9,7 @@ const run = { id: 7, audio_set_id: 1, serial: "S", device_model: "M", profile_na
 
 function panel(over: Partial<Parameters<typeof AppRunPanel>[0]> = {}) {
   return {
-    devices: [device], profiles: [profile], runs: [], runId: null, busy: false, passedCount: 5, selectedCount: 0,
+    devices: [device], profiles: [profile], runs: [], runId: null, busy: false, readyCount: 5, selectedCount: 0,
     onStart: () => {}, onResume: () => {}, onSelectRun: () => {}, onExportForm: () => {}, onExportZip: () => {},
     ...over,
   };
@@ -22,7 +22,7 @@ describe("AppRunPanel", () => {
     expect(screen.getByText(/Chưa có thiết bị/)).toBeTruthy();
   });
   it("disables run when no sentence passed block 1", () => {
-    render(<AppRunPanel {...panel({ passedCount: 0 })} />);
+    render(<AppRunPanel {...panel({ readyCount: 0 })} />);
     expect((screen.getByText("Chạy trên app (tất cả)") as HTMLButtonElement).disabled).toBe(true);
   });
   it("asks for the device only when several phones are connected", () => {
@@ -58,5 +58,31 @@ describe("AppRunPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Zip phiên/ }));
     expect(onExportForm).toHaveBeenCalled();
     expect(onExportZip).toHaveBeenCalled();
+  });
+  it("saves the pause between sentences on the selected profile", async () => {
+    const onSaveProfile = vi.fn().mockResolvedValue(undefined);
+    render(<AppRunPanel {...panel({ onSaveProfile })} />);
+    const gap = screen.getByRole("spinbutton", { name: "Nghỉ giữa các câu (giây)" }) as HTMLInputElement;
+    expect(gap.value).toBe("0");
+    fireEvent.change(gap, { target: { value: "2.5" } });
+    fireEvent.blur(gap);
+    expect(onSaveProfile).toHaveBeenCalledWith({ ...profile, between_delay_s: 2.5 });
+  });
+  it("does not save an invalid or unchanged pause", () => {
+    const onSaveProfile = vi.fn().mockResolvedValue(undefined);
+    render(<AppRunPanel {...panel({ profiles: [{ ...profile, between_delay_s: 3 }], onSaveProfile })} />);
+    const gap = screen.getByRole("spinbutton", { name: "Nghỉ giữa các câu (giây)" }) as HTMLInputElement;
+    expect(gap.value).toBe("3");
+    fireEvent.change(gap, { target: { value: "-1" } });
+    expect(gap.getAttribute("aria-invalid")).toBe("true");
+    fireEvent.blur(gap);
+    fireEvent.change(gap, { target: { value: "3" } });
+    fireEvent.blur(gap);
+    expect(onSaveProfile).not.toHaveBeenCalled();
+    expect(gap.value).toBe("3");
+  });
+  it("locks the pause while a job runs", () => {
+    render(<AppRunPanel {...panel({ busy: true, onSaveProfile: vi.fn() })} />);
+    expect((screen.getByRole("spinbutton", { name: "Nghỉ giữa các câu (giây)" }) as HTMLInputElement).disabled).toBe(true);
   });
 });

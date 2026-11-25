@@ -224,3 +224,18 @@ def test_delete_all_audio_sets_cascades(store, set_id):
     assert store.get_items(set_id) == []
     assert store.get_app_run(run_id) is None
     assert store.delete_all_audio_sets() == 0
+
+
+def test_reset_progress_keeps_rows_and_clears_results(store, set_id):
+    before = store.get_items(set_id)
+    item = store.items_for_generate(set_id, None)[0]
+    store.record_generated(item["id"], "/a/x.wav", 2)
+    run_id = store.create_app_run(set_id, "SER", None, "p", None)
+
+    store.reset_progress()
+
+    after = store.get_items(set_id)
+    assert [i["id"] for i in after] == [i["id"] for i in before]
+    assert [i["status"] for i in after] == [i["status"] for i in before]  # "Không áp dụng" stays
+    assert all(i["audio_path"] is None and i["error"] is None and i["attempts"] == 0 for i in after)
+    assert store.get_app_run(run_id) is None

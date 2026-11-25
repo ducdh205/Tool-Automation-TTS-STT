@@ -146,6 +146,13 @@ nav { display: flex; flex-direction: column; gap: 2px; }
 .btn.danger { color: var(--bad); }
 .btn.ghost { border-color: transparent; background: none; }
 .compact-select { border: 1px solid var(--border); border-radius: 7px; padding: 5px 6px; background: var(--panel-2); max-width: 240px; }
+.gap-field { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; color: var(--muted); white-space: nowrap; }
+.gap-field input { width: 56px; border: 1px solid var(--border); border-radius: 7px; padding: 5px 6px; background: var(--panel-2); color: var(--text); }
+.gap-field input[aria-invalid="true"] { border-color: var(--bad); }
+.speed-row { display: flex; gap: 6px; align-items: center; }
+.speed-field { grid-column: 1 / -1; }
+.speed-row input[type="range"] { flex: 1; min-width: 0; accent-color: var(--accent); }
+.speed-value { font-weight: 600; font-variant-numeric: tabular-nums; margin-left: auto; }
 
 /* popovers & menus */
 .popover-anchor { position: relative; }
@@ -208,7 +215,10 @@ nav { display: flex; flex-direction: column; gap: 2px; }
 .cer { margin-left: 6px; font-size: 11px; display: inline-block; min-width: 30px; }
 .cell-tc { display: flex; align-items: baseline; gap: 3px; }
 .cell-tts { display: flex; align-items: center; gap: 4px; }
-.cell-tts > span.ellipsis { cursor: text; flex: 0 1 auto; }
+.cell-tts > span.cell-text { cursor: text; flex: 0 1 auto; min-width: 0; }
+/* Table cells show their full text: long values wrap and the row grows (rows are measured by the virtualizer). */
+.cell-wrap, .cell-text { white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
+.row:not(.head) { padding-top: 6px; padding-bottom: 6px; box-sizing: border-box; }
 .play-slot { flex: none; width: 22px; display: inline-flex; justify-content: center; }
 .raw-mark { flex: none; color: var(--muted); display: inline-flex; cursor: help; }
 .cell-input { width: 100%; border: 1px solid var(--accent); border-radius: 4px; padding: 2px 6px; background: var(--panel); }

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { api, type AppResult, type Item, type WordOp } from "../api";
 import { formatPct, renderOps } from "../format";
-import { STATUS_CLASS } from "../status";
+import { STATUS_CLASS, VERIFY_CLASS } from "../status";
 import { Icon } from "./Icon";
 
 const ROW_H = 34;
@@ -43,7 +43,7 @@ function Ops({ ops }: { ops: WordOp[] }) {
 }
 
 function AppText({ r }: { r: AppResult | undefined }) {
-  if (!r) return <span className="muted">—</span>;
+  if (!r) return <span className="muted">chưa test</span>;
   if (r.status === "Lỗi thao tác") return <span className="muted" title={r.log ?? ""}>{r.error}</span>;
   if (r.status === "Chờ") return <span className="muted">chưa test</span>;
   if (!r.ops.length) return <span>{r.app_text || <i className="muted">(app không trả câu)</i>}</span>;
@@ -77,7 +77,7 @@ function EditableText({ item, onSave, readOnly }: { item: Item; onSave: (t: stri
   }
   return (
     <span
-      className={`ellipsis ${item.text_tts ? "" : "muted"}`}
+      className={`cell-text ${item.text_tts ? "" : "muted"}`}
       title={readOnly ? item.text_tts ?? item.text_raw : "Nhấp đúp để sửa câu đọc"}
       onDoubleClick={() => { if (readOnly) return; setValue(item.text_tts ?? item.text_raw); setEditing(true); }}
     >
@@ -98,7 +98,7 @@ function PlayButton({ item }: { item: Item }) {
 function columns(app: boolean, sheet: boolean): string {
   return [
     "28px", "minmax(90px, 130px)", sheet && "minmax(90px, 150px)", "minmax(180px, 1fr)", "minmax(180px, 1.2fr)",
-    "84px", "128px", !app && "52px",
+    "84px", app && "92px", "128px", !app && "52px",
   ].filter(Boolean).join(" ");
 }
 
@@ -112,6 +112,8 @@ export function ItemTable({
     count: items.length,
     getScrollElement: () => parentRef.current,
     estimateSize: () => ROW_H,
+    // Rows grow to fit wrapped text; fall back to the base height where layout is unavailable (tests).
+    measureElement: (el) => Math.max(ROW_H, el.getBoundingClientRect().height),
     overscan: 12,
     initialRect: { width: 1200, height: 600 },
   });
@@ -136,6 +138,7 @@ export function ItemTable({
         <span className="num hint" title={`WER: tỉ lệ lỗi theo từ, dùng để chấm. Đạt khi WER ≤ ngưỡng, vượt ngưỡng thì ${verdict}.\nCER (số nhỏ): lỗi theo ký tự, chỉ để tham khảo. CER thấp mà WER cao thường là sai dấu.`}>
           WER <small>CER</small>
         </span>
+        {app && <span className="hint" title="Kết quả verify audio ở Bước 1 (STT tham chiếu). Câu chưa verify hoặc không đạt vẫn được test trên app.">Verify</span>}
         <span>Trạng thái</span>
         {!app && <span />}
       </div>
@@ -151,8 +154,10 @@ export function ItemTable({
               <div
                 key={it.id}
                 data-row
+                data-index={vr.index}
+                ref={v.measureElement}
                 className={`row ${it.enabled ? "" : "disabled"}`}
-                style={{ ...grid, position: "absolute", top: 0, left: 0, right: 0, height: ROW_H, transform: `translateY(${vr.start}px)` }}
+                style={{ ...grid, position: "absolute", top: 0, left: 0, right: 0, minHeight: ROW_H, transform: `translateY(${vr.start}px)` }}
               >
                 <span>
                   <input
@@ -165,11 +170,11 @@ export function ItemTable({
                   />
                 </span>
                 <span className="cell-tc" title={`${it.sheet} · ${it.tc_id}${it.turn ? ` · lượt ${it.turn}` : ""} · dòng ${it.source_row}`}>
-                  <span className="ellipsis">{it.tc_id}</span>
+                  <span className="cell-wrap">{it.tc_id}</span>
                   {/* Only later turns are marked: a plain TC_ID reads as its first (often only) turn. */}
                   {it.turn && it.turn !== "1" && <small className="muted">·{it.turn}</small>}
                 </span>
-                {showSheet && <span className="ellipsis muted" title={it.sheet}>{it.sheet}</span>}
+                {showSheet && <span className="cell-wrap muted" title={it.sheet}>{it.sheet}</span>}
                 <span className="cell-tts">
                   <PlayButton item={it} />
                   <EditableText item={it} readOnly={!!app} onSave={(t) => onPatch(it.id, { text_tts: t })} />
@@ -179,8 +184,13 @@ export function ItemTable({
                     </span>
                   )}
                 </span>
-                <span className="ellipsis">{app ? <AppText r={ar} /> : <SttText item={it} />}</span>
+                <span className="cell-wrap">{app ? <AppText r={ar} /> : <SttText item={it} />}</span>
                 <span className="num">{formatPct(wer)}{cer != null && <small className="muted cer">{formatPct(cer)}</small>}</span>
+                {app && (
+                  <span>
+                    <span className={`badge ${VERIFY_CLASS[it.verify] ?? ""}`} title={`Verify audio: ${it.verify}`}>{it.verify}</span>
+                  </span>
+                )}
                 <span>
                   {app ? (
                     <span className={`badge ${STATUS_CLASS[ar?.status ?? ""] ?? ""}`} title={ar?.error ?? ar?.status ?? ""}>

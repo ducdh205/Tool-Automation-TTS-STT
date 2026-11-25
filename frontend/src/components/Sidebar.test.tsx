@@ -55,7 +55,7 @@ describe("Sidebar steps", () => {
     expect(screen.getByText("Bước 1 — Audio")).toBeTruthy();
     const step2 = screen.getByText("Bước 2 — Test app").closest("button")!;
     expect(step2.disabled).toBe(true);
-    expect(step2.title).toBe("Cần ít nhất một câu Đạt ở Bước 1");
+    expect(step2.title).toBe("Cần sinh audio ở Bước 1 trước");
     expect(screen.queryByText("Báo cáo")).toBeNull();
   });
 

@@ -25,6 +25,7 @@ class AppProfile:
     post_delay_s: float = 1.0
     listen_timeout_s: float = 6.0
     result_timeout_s: float = 10.0
+    between_delay_s: float = 0.0  # pause after one sentence before speaking the next
 
     def to_json(self) -> dict:
         return asdict(self)

@@ -27,7 +27,7 @@ const NAV: { id: Section; label: string; hint: string }[] = [
   { id: "step1", label: "Bước 1 — Audio", hint: "Nạp file · Sinh audio · Verify" },
   { id: "step2", label: "Bước 2 — Test app", hint: "Chạy trên điện thoại · Xuất phiên" },
 ];
-const STEP2_LOCKED = "Cần ít nhất một câu Đạt ở Bước 1";
+const STEP2_LOCKED = "Cần sinh audio ở Bước 1 trước";
 
 type Level = "ok" | "warn" | "bad" | "off";
 

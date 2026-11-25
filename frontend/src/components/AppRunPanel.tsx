@@ -9,15 +9,21 @@ interface Props {
   runs: AppRun[];
   runId: number | null;
   busy: boolean;
-  passedCount: number;
-  /** Rows picked in the Step 2 table (0 = run every row that passed). */
+  /** Rows with audio (verified or not): what a run without a selection tests. */
+  readyCount: number;
+  /** Rows picked in the Step 2 table (0 = run every row with audio). */
   selectedCount: number;
   onStart: (serial: string, profile: string) => void;
+  /** Saves an edited profile (the pause between sentences lives on the app profile). */
+  onSaveProfile?: (profile: AppProfile) => Promise<void>;
   onExportForm: () => void;
   onExportZip: () => void;
   onResume: (runId: number) => void;
   onSelectRun: (runId: number | null) => void;
 }
+
+/** Same upper bound as the backend (ProfileIn.between_delay_s). */
+const MAX_GAP_S = 60;
 
 const runLabel = (r: AppRun) => `#${r.id} · ${r.device_model ?? r.serial} · ${r.created_at.slice(5, 16).replace("T", " ")}`;
 
@@ -29,9 +35,28 @@ export function AppRunPanel(p: Props) {
   useEffect(() => { if (!ready.some((d) => d.serial === serial)) setSerial(ready[0]?.serial ?? ""); }, [ready, serial]);
   useEffect(() => { if (!profile && p.profiles[0]) setProfile(p.profiles[0].name); }, [p.profiles, profile]);
 
+  const current = p.profiles.find((x) => x.name === profile);
+  const savedGap = String(current?.between_delay_s ?? 0);
+  const [gap, setGap] = useState<string | null>(null); // null = show the saved value
+  useEffect(() => setGap(null), [profile, savedGap]);
+  const gapValue = gap ?? savedGap;
+  const gapValid = gapValue.trim() !== "" && Number(gapValue) >= 0 && Number(gapValue) <= MAX_GAP_S;
+  const commitGap = async () => {
+    if (gap === null || !current || !p.onSaveProfile) return;
+    if (!gapValid || Number(gap) === Number(savedGap)) {
+      setGap(null);
+      return;
+    }
+    try {
+      await p.onSaveProfile({ ...current, between_delay_s: Number(gap) });
+    } catch {
+      setGap(null); // the caller reports the error; fall back to the saved value
+    }
+  };
+
   const run = p.runs.find((r) => r.id === p.runId);
   const pending = run ? (run.summary["Chờ"] ?? 0) + (run.summary["Lỗi thao tác"] ?? 0) : 0;
-  const canStart = !!serial && !!profile && !p.busy && p.passedCount > 0;
+  const canStart = !!serial && !!profile && !p.busy && p.readyCount > 0;
 
   return (
     <>
@@ -46,8 +71,21 @@ export function AppRunPanel(p: Props) {
         onChange={(e) => setProfile(e.target.value)}>
         {p.profiles.map((x) => <option key={x.name}>{x.name}</option>)}
       </select>
+      {p.onSaveProfile && (
+        <label className="gap-field" title="Thời gian nghỉ sau mỗi câu trước khi phát câu tiếp theo (lưu vào hồ sơ app)">
+          <span>Nghỉ giữa câu</span>
+          <input type="number" min={0} max={MAX_GAP_S} step={0.5} aria-label="Nghỉ giữa các câu (giây)"
+            aria-invalid={!gapValid} value={gapValue} disabled={p.busy || !current}
+            onChange={(e) => setGap(e.target.value)} onBlur={() => void commitGap()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") e.currentTarget.blur();
+              if (e.key === "Escape") setGap(null);
+            }} />
+          <span>s</span>
+        </label>
+      )}
       <button className="btn primary" disabled={!canStart} onClick={() => p.onStart(serial, profile)}
-        title={p.passedCount ? "" : "Chạy Khối 1 trước: chỉ câu Đạt mới được test trên app"}>
+        title={p.readyCount ? "" : "Sinh audio ở Khối 1 trước"}>
         <Icon name="play" />Chạy trên app ({p.selectedCount || "tất cả"})
       </button>
       <Popover iconOnly buttonClassName="info-btn" panelLabel="Chuẩn bị trước khi chạy" label={<Icon name="info" />}>

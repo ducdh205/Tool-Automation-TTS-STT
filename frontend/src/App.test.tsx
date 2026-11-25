@@ -6,7 +6,7 @@ vi.mock("./ws", () => ({ connectEvents: () => () => {} }));
 
 const settings: Settings = {
   voice: "voice-1", voice_trung: "voice-t", voice_nam: "voice-n", wer_threshold: 0, stt_timeout_s: 30, reject_warn_ratio: 0.1,
-  max_regen: 3, wyoming_host: "localhost", wyoming_port: 10300, wyoming_cmd: [], port: 8765,
+  voice_speed: 1, max_regen: 3, wyoming_host: "localhost", wyoming_port: 10300, wyoming_cmd: [], port: 8765,
 };
 
 afterEach(() => vi.restoreAllMocks());
@@ -53,18 +53,25 @@ it("edits run settings from the action bar and saves WER as a ratio", async () =
   const reject = panel.getByRole("spinbutton", { name: /Cảnh báo khi tỉ lệ loại/ });
   expect((reject as HTMLInputElement).value).toBe("10");
   fireEvent.change(reject, { target: { value: "20" } });
+  const speed = panel.getByRole("slider", { name: "Tốc độ giọng (x)" });
+  expect((speed as HTMLInputElement).value).toBe("1");
+  // Out-of-range speeds are blocked by the input itself (the browser refuses to submit).
+  expect([speed.getAttribute("min"), speed.getAttribute("max")]).toEqual(["0.7", "1.3"]);
+  fireEvent.change(speed, { target: { value: "1.2" } });
   fireEvent.click(panel.getByRole("button", { name: "Lưu cài đặt" }));
 
   await waitFor(() => expect(save).toHaveBeenCalledWith({
-    ...settings, voice: "voice-2", voice_nam: "voice-2", wer_threshold: 0.25, stt_timeout_s: 45, reject_warn_ratio: 0.2,
+    ...settings, voice: "voice-2", voice_nam: "voice-2", voice_speed: 1.2, wer_threshold: 0.25, stt_timeout_s: 45,
+    reject_warn_ratio: 0.2,
   }));
+  expect(trigger.textContent).toContain("1.2x");
   // Saved: the panel closes and the summary shows the new values.
   await waitFor(() => expect(controls.queryByRole("dialog", { name: "Cài đặt chạy" })).toBeNull());
   expect(trigger.textContent).toContain("WER ≤ 25% · 45s");
   expect(trigger.textContent).not.toContain("chưa lưu");
 });
 
-it("asks before saving settings whether to delete the existing audio sets", async () => {
+it("asks before saving settings whether to wipe the progress of existing sets", async () => {
   const mk = (id: number, name: string) => ({ id, name, source_file: "f.xlsx", sheets: ["S1"], voice: null,
     created_at: "", summary: { "Chờ": 1 } });
   vi.spyOn(api, "profiles").mockResolvedValue([]);
@@ -77,7 +84,8 @@ it("asks before saving settings whether to delete the existing audio sets", asyn
   vi.spyOn(api, "appRuns").mockResolvedValue([]);
   vi.spyOn(api, "items").mockResolvedValue([]);
   const save = vi.spyOn(api, "saveSettings").mockImplementation(async (values) => values);
-  const del = vi.spyOn(api, "deleteSet").mockResolvedValue({ ok: true });
+  const reset = vi.spyOn(api, "resetProgress").mockResolvedValue({ ok: true, items: 2 });
+  const del = vi.spyOn(api, "deleteSet");
 
   render(<App />);
   const bar = (await screen.findAllByRole("button", { name: "Nạp file" }))[0].closest(".runbar") as HTMLElement;
@@ -90,20 +98,21 @@ it("asks before saving settings whether to delete the existing audio sets", asyn
   // Cancel: nothing is saved or deleted.
   fireEvent.change(wer, { target: { value: "5" } });
   fireEvent.click(panel.getByRole("button", { name: "Lưu cài đặt" }));
-  const ask = within(screen.getByRole("alertdialog", { name: "Xóa bộ audio cũ?" }));
+  const ask = within(screen.getByRole("alertdialog", { name: "Xóa tiến trình cũ?" }));
   expect(ask.getByText(/2 bộ audio/)).toBeTruthy();
   fireEvent.click(ask.getByRole("button", { name: "Hủy" }));
   expect(screen.queryByRole("alertdialog")).toBeNull();
   expect(save).not.toHaveBeenCalled();
 
-  // Accept: settings are saved, then every old set is deleted.
+  // Accept: settings are saved, then progress is wiped; the sets and their rows stay.
   fireEvent.click(panel.getByRole("button", { name: "Lưu cài đặt" }));
-  sets.mockResolvedValue([]);
-  fireEvent.click(screen.getByRole("button", { name: "Lưu & xóa bộ cũ" }));
+  const reloads = sets.mock.calls.length;
+  fireEvent.click(screen.getByRole("button", { name: "Lưu & xóa tiến trình" }));
   await waitFor(() => expect(save).toHaveBeenCalledWith({ ...settings, wer_threshold: 0.05 }));
-  await waitFor(() => expect(del).toHaveBeenCalledTimes(2));
-  expect(del.mock.calls.map((c) => c[0]).sort()).toEqual([1, 2]);
-  await waitFor(() => expect(screen.queryByRole("button", { name: "Xóa bộ Bộ B" })).toBeNull());
+  await waitFor(() => expect(reset).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(sets.mock.calls.length).toBeGreaterThan(reloads));
+  expect(del).not.toHaveBeenCalled();
+  expect(screen.getByRole("button", { name: "Xóa bộ Bộ B" })).toBeTruthy();
 });
 
 it("deletes the open audio set and opens the next one", async () => {

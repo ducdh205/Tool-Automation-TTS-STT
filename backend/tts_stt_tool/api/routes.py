@@ -11,7 +11,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException, Request, UploadFile
+from fastapi import APIRouter, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.background import BackgroundTask
@@ -33,6 +33,7 @@ from tts_stt_tool.report.session_zip import build_session_zip, session_root_name
 from tts_stt_tool.store.db import ItemStatus
 from tts_stt_tool.stt.wyoming_client import WyomingStt
 from tts_stt_tool.tts.base import VoiceInfo
+from tts_stt_tool.tts.speed import MAX_SPEED, MIN_SPEED
 
 router = APIRouter()
 XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -203,6 +204,25 @@ async def clear_all_data(request: Request) -> dict[str, Any]:
     return {"ok": True, "sets": count}
 
 
+@router.delete("/progress")
+async def reset_progress(request: Request) -> dict[str, Any]:
+    """Clear generated audio, STT/WER results and app runs of every set; imported rows are kept as "Chờ"."""
+    ctx = ctx_of(request)
+    job = ctx.runner.current()
+    if job is not None:  # a running job may be writing rows or files
+        raise HTTPException(409, f"Đang chạy: {job['name']} — dừng job trước khi xóa")
+    count = ctx.store.reset_progress()
+    ctx.exports.clear()
+
+    def cleanup() -> None:
+        # No row points at a WAV any more, so the whole audio cache is stale.
+        for d in (ctx.cache.root, ctx.reports, ctx.settings.data_dir / "app_runs"):
+            _empty_dir(d)
+
+    await asyncio.to_thread(cleanup)
+    return {"ok": True, "items": count}
+
+
 @router.get("/audio-sets/{set_id}/items")
 def get_items(request: Request, set_id: int, status: str | None = None) -> list[dict[str, Any]]:
     ctx = ctx_of(request)
@@ -355,6 +375,7 @@ class SettingsIn(BaseModel):
     voice: str | None = None
     voice_trung: str | None = None
     voice_nam: str | None = None
+    voice_speed: float = Field(default=1.0, ge=MIN_SPEED, le=MAX_SPEED)
     max_regen: int = Field(ge=0, le=10)
     wer_threshold: float = Field(ge=0, le=1)
     reject_warn_ratio: float = Field(ge=0, le=1)
@@ -392,12 +413,14 @@ async def voices(request: Request) -> list[dict[str, str]]:
 
 
 @router.get("/voices/preview")
-async def voice_preview(request: Request, voice_id: str) -> FileResponse:
+async def voice_preview(request: Request, voice_id: str,
+                        speed: float = Query(default=1.0, ge=MIN_SPEED, le=MAX_SPEED)) -> FileResponse:
     ctx = ctx_of(request)
     if not any(voice.id == voice_id for voice in await _available_voices(ctx)):
         raise HTTPException(404, "Giọng VieNeu này không có sẵn")
     async with ctx.voice_lock:
-        path = await ctx.voice_preview_cache.get_or_synthesize(ctx.tts, VOICE_PREVIEW_TEXT, voice_id, attempt=0)
+        path = await ctx.voice_preview_cache.get_or_synthesize(ctx.tts, VOICE_PREVIEW_TEXT, voice_id, attempt=0,
+                                                               speed=speed)
     return FileResponse(path, media_type="audio/wav")
 
 
@@ -500,6 +523,7 @@ class ProfileIn(BaseModel):
     post_delay_s: float = Field(ge=0, le=10)
     listen_timeout_s: float = Field(gt=0, le=60)
     result_timeout_s: float = Field(gt=0, le=120)
+    between_delay_s: float = Field(default=0.0, ge=0, le=60)
 
 
 @router.get("/profiles")
@@ -550,8 +574,8 @@ async def create_app_run(request: Request, set_id: int, body: AppRunIn) -> dict[
     profile = _profile(ctx, body.profile)
     if ctx.runner.current() is not None:
         raise HTTPException(409, f"Đang chạy: {ctx.runner.current()['name']}")
-    if not ctx.store.summary(set_id).get(ItemStatus.PASSED.value):
-        raise HTTPException(422, "Bộ audio chưa có câu Đạt — chạy Khối 1 trước")
+    if not ctx.store.count_with_audio(set_id):
+        raise HTTPException(422, "Bộ audio chưa có câu nào có audio — sinh audio ở Khối 1 trước")
     model = version = None
     if ctx.device_factory is None and ctx.adb.available:
         try:
@@ -562,7 +586,7 @@ async def create_app_run(request: Request, set_id: int, body: AppRunIn) -> dict[
     run_id = ctx.store.create_app_run(set_id, body.serial, model, profile.name, version, item_ids=body.item_ids)
     if not ctx.store.app_results(run_id):
         ctx.store.delete_app_run(run_id)
-        raise HTTPException(422, "Không có câu Đạt nào trong các case đã chọn")
+        raise HTTPException(422, "Không có câu nào có audio trong các case đã chọn")
     return {"id": run_id, "job_id": _start_block2(ctx, run_id, body.serial, profile)}
 
 

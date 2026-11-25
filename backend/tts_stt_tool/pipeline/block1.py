@@ -46,10 +46,11 @@ async def run_generate(
     item_ids: list[int] | None = None,
     regenerate: bool = False,
 ) -> None:
-    audio_set = store.get_audio_set(audio_set_id) or {}
-    # sets made before per-region voices have no voice_trung/voice_nam: those rows keep the set's voice
-    voices = audio_set if audio_set.get("voice") else {
-        "voice": settings.voice, "voice_trung": settings.voice_trung, "voice_nam": settings.voice_nam}
+    # Always speak with the voices currently saved in Settings (not the ones captured at import),
+    # and record them on the set so its header matches the audio being produced.
+    voices = {"voice": settings.voice, "voice_trung": settings.voice_trung, "voice_nam": settings.voice_nam}
+    if store.get_audio_set(audio_set_id) is not None:
+        store.set_voices(audio_set_id, **voices)
     query = store.items_for_regenerate if regenerate else store.items_for_generate
     todo = query(audio_set_id, item_ids)
     total = len(todo)
@@ -65,7 +66,7 @@ async def run_generate(
         attempt = item["attempts"] if regenerate else 0
         voice = voice_for(item.get("region"), voices)
         try:
-            path = await cache.get_or_synthesize(tts, text, voice, attempt)
+            path = await cache.get_or_synthesize(tts, text, voice, attempt, speed=settings.voice_speed)
             if not store.record_generated(item["id"], str(path), attempt + 1, text_tts=text):
                 _LOG.info("block1 item %s edited while synthesizing; audio dropped", item["id"])
         except Exception as e:  # per-item problem (TTS failure, bad text): mark and continue

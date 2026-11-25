@@ -387,3 +387,39 @@ def test_clear_all_data_while_job_runs_is_409(tmp_path):
         job = c.get("/api/jobs/current").json()
         c.post(f"/api/jobs/{job['id']}/cancel")
         wait_job_end(c)
+
+
+def test_reset_progress_keeps_rows_and_removes_wavs(client, tmp_path):
+    set_id = create_set(client, tmp_path)
+    before = statuses(client, set_id)
+    assert client.post(f"/api/audio-sets/{set_id}/generate").status_code == 200
+    wait_job_end(client)
+    wavs = {i["audio_path"] for i in client.get(f"/api/audio-sets/{set_id}/items").json() if i["audio_path"]}
+    assert wavs
+
+    res = client.delete("/api/progress")
+
+    assert res.status_code == 200
+    assert statuses(client, set_id) == before
+    assert all(i["audio_path"] is None for i in client.get(f"/api/audio-sets/{set_id}/items").json())
+    assert not any(Path(p).exists() for p in wavs)
+    assert [s["id"] for s in client.get("/api/audio-sets").json()] == [set_id]
+
+
+def test_settings_voice_speed(client):
+    s = client.get("/api/settings").json()
+    assert s["voice_speed"] == 1.0
+    assert client.put("/api/settings", json=s | {"voice_speed": 1.2}).status_code == 200
+    assert client.get("/api/settings").json()["voice_speed"] == 1.2
+    for bad in (0.5, 1.5):
+        assert client.put("/api/settings", json=s | {"voice_speed": bad}).status_code == 422
+
+
+def test_voice_preview_speed(client, monkeypatch):
+    tts = client.app.state.ctx.tts
+    monkeypatch.setattr(tts, "voices", lambda: [VoiceInfo("Quang Sơn", "Quang Sơn — Nam · Trung")])
+    normal = client.get("/api/voices/preview", params={"voice_id": "Quang Sơn"})
+    fast = client.get("/api/voices/preview", params={"voice_id": "Quang Sơn", "speed": 1.2})
+    assert normal.status_code == fast.status_code == 200
+    assert len(fast.content) < len(normal.content)
+    assert client.get("/api/voices/preview", params={"voice_id": "Quang Sơn", "speed": 3}).status_code == 422

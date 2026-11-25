@@ -313,8 +313,9 @@ def test_generate_uses_the_voice_of_each_rows_region(env):
     rows = [("Bắc", "một"), ("BAC-HN", "hai"), ("Miền Trung", "ba"), ("Nam", "bốn"), ("", "năm"), ("??", "sáu")]
     items = [InputItem(sheet="S", tc_id=f"TC-{i}", turn="1", feature="", priority="", region=r, speaker="",
                        text_raw=t, expected="", source_row=i) for i, (r, t) in enumerate(rows)]
-    set_id = store.create_audio_set("s", "f.xlsx", ["S"], "Bắc-voice", items,
-                                    voice_trung="Trung-voice", voice_nam="Nam-voice")
+    # the set was imported with other voices; generating must use the voices saved in Settings now
+    set_id = store.create_audio_set("s", "f.xlsx", ["S"], "Cũ", items, voice_trung="Cũ", voice_nam="Cũ")
+    settings.voice, settings.voice_trung, settings.voice_nam = "Bắc-voice", "Trung-voice", "Nam-voice"
     used: dict[str, str] = {}
 
     class VoiceTts(FakeTts):

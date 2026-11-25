@@ -7,6 +7,8 @@ export const STATUS_CLASS: Record<string, string> = {
   "Đúng": "st-pass", "Sai": "st-fail", "Lỗi thao tác": "st-error",
 };
 
+export const VERIFY_CLASS: Record<string, string> = { "Đạt": "st-pass", "Không đạt": "st-fail", "Chưa": "st-pending" };
+
 export const APP_STATUSES: AppStatus[] = ["Chờ", "Đúng", "Sai", "Lỗi thao tác"];
 
 /** Share of the scored cases that came out right (null before anything was scored). */
