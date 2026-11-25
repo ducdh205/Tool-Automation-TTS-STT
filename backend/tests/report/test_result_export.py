@@ -41,21 +41,21 @@ def test_keeps_source_format(tmp_path, session):
     ws = wb[SHEET]
     assert "A1:C1" in {str(r) for r in ws.merged_cells.ranges}
     assert ws.column_dimensions["C"].width == 33
-    assert [ws[f"{c}4"].value for c in "DEF"] == RESULT_HEADERS
+    assert [ws[f"{c}4"].value for c in "DEFG"] == RESULT_HEADERS
     assert ws["D4"].font.bold and ws["D4"].fill.fgColor.rgb == HEADER_FILL
     assert ws["D5"].value == "bật ionizer" and ws["E5"].value == "Pass"
     assert ws["E6"].value == "Fail"
     assert ws["E7"].value.startswith("Lỗi thao tác")
     assert [[ws.cell(r, c).value for c in (1, 2, 3)] for r in (5, 6)] == [
         ["TC1", 1, "Bật ionizer"], ["TC2", 1, "Hey Vita, mở cửa sổ"]]
-    assert ws.auto_filter.ref == "A4:F8"
+    assert ws.auto_filter.ref == "A4:G8"
     assert ws.column_dimensions["D"].width == 40 and ws.column_dimensions["F"].width == 50
 
 
 def test_untested_rows_blank(tmp_path, session):
     ws = build(session, tmp_path)[SHEET]
     assert ws["A8"].value == "TC4"
-    assert [ws[f"{c}8"].value for c in "DEF"] == [None, None, None]
+    assert [ws[f"{c}8"].value for c in "DEFG"] == [None, None, None, None]
 
 
 def test_overview_first(tmp_path, session):
@@ -112,9 +112,9 @@ def test_unheaded_columns_are_not_overwritten(tmp_path, session):
     wb.save(src)
     out = build(session, tmp_path)[SHEET]
     assert out["D6"].value == "ghi chú tay" and out["E7"].value == "=A7"
-    assert [out[f"{c}4"].value for c in "FGH"] == RESULT_HEADERS
+    assert [out[f"{c}4"].value for c in "FGHI"] == RESULT_HEADERS
     assert out["G6"].value == "Fail"
-    assert out.auto_filter.ref == "A4:H8"
+    assert out.auto_filter.ref == "A4:I8"
 
 
 def test_only_overview_tab_selected(tmp_path, session):
@@ -147,3 +147,41 @@ def test_referenced_unselected_sheets_kept_hidden(tmp_path, session):
     assert wb.sheetnames == [OVERVIEW_SHEET, SHEET, "Danh mục", "Tra cứu"]
     assert [wb[s].sheet_state for s in wb.sheetnames] == ["visible", "visible", "hidden", "hidden"]
     assert wb[SHEET]["C9"].value == "='Danh mục'!A1"
+
+
+def _real_png(path, size=(1080, 2400)):
+    from PIL import Image
+
+    Image.new("RGB", size, (200, 30, 30)).save(path)
+
+
+def _images_by_cell(ws):
+    return {f"{chr(65 + img.anchor._from.col)}{img.anchor._from.row + 1}": img for img in ws._images}
+
+
+def test_screenshot_embedded_for_fail_and_op_error(tmp_path, session):
+    for tc in ("TC2", "TC3"):
+        _real_png(session.by_tc[tc]["screenshot_path"])
+    ws = build(session, tmp_path)[SHEET]
+    assert ws["G4"].value == "Ảnh màn hình"
+    images = _images_by_cell(ws)
+    assert set(images) == {"G6", "G7"}
+    assert images["G6"].height == 240 and images["G6"].width == 108
+    assert ws.row_dimensions[6].height >= 180
+    assert ws.row_dimensions[5].height is None  # Pass row keeps its height
+    assert ws.column_dimensions["G"].width == 22
+
+
+def test_screenshot_missing_or_unreadable(tmp_path, session):
+    Path(session.by_tc["TC3"]["screenshot_path"]).unlink()  # TC2's file is not a real PNG
+    ws = build(session, tmp_path)[SHEET]
+    assert not ws._images
+    assert ws["G6"].value == ws["G7"].value == "(không tìm thấy ảnh)"
+    assert ws["G5"].value is None
+
+
+def test_screenshot_in_plain_sheet(tmp_path):
+    s = make_session(tmp_path, source=False)
+    _real_png(s.by_tc["TC2"]["screenshot_path"])
+    ws = build(s, tmp_path)[SHEET]
+    assert set(_images_by_cell(ws)) == {"I3"}

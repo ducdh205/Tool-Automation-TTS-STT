@@ -96,8 +96,8 @@ Không cài gì lên điện thoại (chỉ dùng `adb` có sẵn của Android)
    kết quả app của phiên đang chọn; tỉ lệ Đúng hiện cạnh tên bộ audio.
 6. Xuất kết quả của phiên đang chọn (nút **Xuất ▾**):
    - **Excel kết quả** — bản sao file input giữ nguyên định dạng, chỉ còn các sheet đã chọn; sheet đầu
-     *Tổng hợp phiên*; mỗi sheet thêm 3 cột sau cột cuối: *Text app nghe được*, *Kết quả* (Pass / Fail /
-     Lỗi thao tác), *Ghi chú* (WER, CER, từ sai). Sheet không chọn nhưng có dropdown / công thức
+     *Tổng hợp phiên*; mỗi sheet thêm 4 cột sau cột cuối: *Text app nghe được*, *Kết quả* (Pass / Fail /
+     Lỗi thao tác), *Ghi chú* (WER, CER, từ sai), *Ảnh màn hình* (ảnh thu nhỏ của câu Fail / Lỗi thao tác). Sheet không chọn nhưng có dropdown / công thức
      trỏ tới được giữ lại ở dạng ẩn. Bộ audio tạo trước khi có tính năng này hoặc input csv: bảng đơn giản.
      File gốc không bị sửa.
    - **Zip phiên** — chọn audio kèm theo: chỉ case Sai / Lỗi thao tác (mặc định), tất cả, hoặc các case đang chọn:

@@ -1,12 +1,13 @@
 """An app run written into a copy of the audio set's input file (the kept copy itself is never modified).
 
 The selected sheets keep their content and formatting; a summary sheet goes first and each sheet
-gets three result columns after its last used column. Without the input file (csv input, sets made
+gets four result columns (text, verdict, note, screenshot) after its last used column. Without the input file (csv input, sets made
 before the file was kept, file gone) every sheet is a plain table instead.
 """
 
 from __future__ import annotations
 
+import io
 import re
 from copy import copy
 from pathlib import Path
@@ -14,6 +15,7 @@ from typing import Any
 
 import openpyxl
 from openpyxl import Workbook
+from openpyxl.drawing.image import Image as XlImage
 from openpyxl.styles import Alignment, PatternFill
 from openpyxl.utils import get_column_letter, range_boundaries
 
@@ -22,9 +24,13 @@ from tts_stt_tool.report.layout import DEFAULT_SHEET
 from tts_stt_tool.store.db import AppStatus, Store
 
 OVERVIEW_SHEET = "Tổng hợp phiên"
-RESULT_HEADERS = ["Text app nghe được", "Kết quả", "Ghi chú"]
-_RESULT_WIDTHS = (40, 14, 50)
-_RESULT_WRAP = (True, False, True)
+RESULT_HEADERS = ["Text app nghe được", "Kết quả", "Ghi chú", "Ảnh màn hình"]
+_RESULT_WIDTHS = (40, 14, 50, 22)
+_RESULT_WRAP = (True, False, True, True)
+SHOT_HEIGHT_PX = 240
+_SHOT_ROW_PT = SHOT_HEIGHT_PX * 0.75 + 6  # row height in points that fits the thumbnail
+_SHOT_STATUSES = (AppStatus.FAILED.value, AppStatus.OP_ERROR.value)
+SHOT_MISSING = "(không tìm thấy ảnh)"
 _PLAIN_HEADERS = ["TC_ID", "Lượt", "Vùng miền", "Câu gốc", "Kết quả mong đợi"]
 _PLAIN_KEYS = ["tc_id", "turn", "region", "text_raw", "expected"]
 _PLAIN_WIDTHS = (14, 8, 12, 45, 40)
@@ -61,10 +67,39 @@ def result_suffix(audio_set: dict[str, Any]) -> str:
     return ".xlsm" if src is not None and src.suffix.lower() == ".xlsm" else ".xlsx"
 
 
+def _thumbnail(path: Path) -> XlImage | None:
+    """A JPEG copy SHOT_HEIGHT_PX tall (full phone screenshots would bloat the workbook)."""
+    from PIL import Image
+
+    try:
+        with Image.open(path) as im:
+            im = im.convert("RGB")
+            im.thumbnail((im.width * SHOT_HEIGHT_PX // max(im.height, 1) or 1, SHOT_HEIGHT_PX))
+            buf = io.BytesIO()
+            im.save(buf, "JPEG", quality=80)
+    except (OSError, ValueError):  # missing or not an image
+        return None
+    buf.seek(0)
+    return XlImage(buf)
+
+
+def _write_screenshot(ws: Any, row: int, col: int, result: dict[str, Any]) -> None:
+    if result["status"] not in _SHOT_STATUSES or not result.get("screenshot_path"):
+        return
+    img = _thumbnail(Path(result["screenshot_path"]))
+    if img is None:
+        ws.cell(row=row, column=col, value=SHOT_MISSING).alignment = Alignment(vertical="top", wrap_text=True)
+        return
+    ws.add_image(img, f"{get_column_letter(col)}{row}")
+    dim = ws.row_dimensions[row]
+    dim.height = max(dim.height or 0, _SHOT_ROW_PT)
+
+
 def _write_results(ws: Any, row: int, first_col: int, result: dict[str, Any]) -> None:
     for i, value in enumerate(result_values(result)):
         c = ws.cell(row=row, column=first_col + i, value=value or None)
         c.alignment = Alignment(vertical="top", wrap_text=_RESULT_WRAP[i])
+    _write_screenshot(ws, row, first_col + 3, result)
 
 
 def _last_column(ws: Any, header_row: int, last_row: int) -> int:
