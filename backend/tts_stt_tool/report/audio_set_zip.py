@@ -16,7 +16,14 @@ from tts_stt_tool.store.db import ItemStatus, Store
 FORMAT = "tts-stt-audio-set"
 VERSION = 1
 MANIFEST = "manifest.json"
-_WAV_NAME = re.compile(r"^[A-Za-z0-9_\-]+\.wav$")
+_WAV_NAME = re.compile(r"[A-Za-z0-9_\-]+\.wav")  # always used with fullmatch: "$" would let a trailing "\n" through
+_SET_TEXT = ("name", "source_file", "voice", "voice_trung", "voice_nam")
+_TEXT_COLS = ("sheet", "tc_id", "turn", "feature", "priority", "region", "speaker", "expected", "text_raw",
+              "text_tts", "skip_reason", "ref_text", "error", "updated_at")
+_INT_COLS = ("source_row", "enabled", "attempts")
+_REAL_COLS = ("wer", "cer")
+_JSON_LIST_COLS = ("ops_json", "form_json")
+_INT64 = 2**63
 # Rows in these states claim to have a WAV: without one they are not what they say.
 _NEEDS_AUDIO = (ItemStatus.GENERATED.value, ItemStatus.PASSED.value, ItemStatus.AUDIO_FAILED.value)
 
@@ -40,7 +47,7 @@ def build_audio_set_zip(store: Store, audio_set_id: int, out: Path) -> None:
         row = dict(row)
         path = row.pop("audio_path", None)
         entry = None
-        if path and _WAV_NAME.match(Path(path).name) and Path(path).is_file():
+        if path and _WAV_NAME.fullmatch(Path(path).name) and Path(path).is_file():
             wavs.setdefault(Path(path).name, Path(path))
             entry = f"audio/{Path(path).name}"
         row["audio"] = entry
@@ -57,7 +64,7 @@ def _audio_entry(value: Any) -> str | None:
     """The WAV file name an item points to; PackError for anything but ``audio/<safe name>.wav``."""
     if value is None:
         return None
-    if isinstance(value, str) and value.startswith("audio/") and _WAV_NAME.match(value[6:]):
+    if isinstance(value, str) and value.startswith("audio/") and _WAV_NAME.fullmatch(value[6:]):
         return value[6:]
     raise PackError("File không đúng định dạng: đường dẫn audio không hợp lệ")
 
@@ -67,7 +74,7 @@ def _read_manifest(z: zipfile.ZipFile) -> dict[str, Any]:
     if MANIFEST not in names:
         raise PackError("File không phải gói bộ audio (thiếu manifest.json)")
     for name in names:  # every entry is checked before anything is written
-        if name not in (MANIFEST, "audio/") and not (name.startswith("audio/") and _WAV_NAME.match(name[6:])):
+        if name not in (MANIFEST, "audio/") and not (name.startswith("audio/") and _WAV_NAME.fullmatch(name[6:])):
             raise PackError(f"File không đúng định dạng: mục không hợp lệ trong zip ({name})")
     try:
         manifest = json.loads(z.read(MANIFEST))
@@ -80,7 +87,55 @@ def _read_manifest(z: zipfile.ZipFile) -> dict[str, Any]:
     if not isinstance(manifest.get("audio_set"), dict) or not isinstance(manifest.get("items"), list) \
             or not all(isinstance(i, dict) for i in manifest["items"]):
         raise PackError("manifest.json thiếu thông tin bộ audio hoặc danh sách câu")
+    _check_values(manifest)
     return manifest
+
+
+def _check_values(manifest: dict[str, Any]) -> None:
+    """Every value must be something the database can hold and the app can read back (else PackError).
+
+    Runs before anything is copied: a hand-edited manifest must not turn into a 500 or into a set that
+    breaks later (a bad ``form_json`` would fail the form export).
+    """
+    def bad(where: str) -> None:
+        raise PackError(f"manifest.json: giá trị không hợp lệ ở {where}")
+
+    audio_set = manifest["audio_set"]
+    for k in _SET_TEXT:
+        if audio_set.get(k) is not None and not isinstance(audio_set[k], str):
+            bad(f"bộ audio (cột {k})")
+    sheets = audio_set.get("sheets")
+    if sheets is not None and not (isinstance(sheets, list) and all(isinstance(x, str) for x in sheets)):
+        bad("bộ audio (cột sheets)")
+    statuses = {st.value for st in ItemStatus}
+    for n, item in enumerate(manifest["items"], 1):
+        def at(col: str) -> str:
+            return f"câu thứ {n} (cột {col})"
+
+        for k in _TEXT_COLS:
+            if item.get(k) is not None and not isinstance(item[k], str):
+                bad(at(k))
+        for k in _INT_COLS:
+            v = item.get(k)
+            if v is not None and not (isinstance(v, int) and -_INT64 <= v < _INT64):
+                bad(at(k))
+        for k in _REAL_COLS:
+            v = item.get(k)
+            if v is not None and (isinstance(v, bool) or not isinstance(v, (int, float))):
+                bad(at(k))
+        status = item.get("status")
+        if status is not None and not (isinstance(status, str) and status in statuses):
+            bad(at("status"))
+        for k in _JSON_LIST_COLS:
+            v = item.get(k)
+            if v is None:
+                continue
+            try:
+                ok = isinstance(v, str) and isinstance(json.loads(v), list)
+            except ValueError:
+                ok = False
+            if not ok:
+                bad(at(k))
 
 
 def import_audio_set_zip(store: Store, zip_path: Path, audio_dir: Path) -> dict[str, int]:

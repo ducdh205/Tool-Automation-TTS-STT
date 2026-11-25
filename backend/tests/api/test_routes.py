@@ -468,3 +468,18 @@ def test_export_and_import_while_job_runs_are_409(tmp_path):
         job = c.get("/api/jobs/current").json()
         c.post(f"/api/jobs/{job['id']}/cancel")
         wait_job_end(c)
+
+
+def test_import_manifest_with_unusable_value_is_422_not_500(client):
+    import io
+    import json
+    import zipfile
+
+    buf = io.BytesIO()
+    manifest = {"format": "tts-stt-audio-set", "version": 1,
+                "audio_set": {"name": "X", "sheets": ["S1"]}, "items": [{"tc_id": [1, 2], "status": "Chờ"}]}
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("manifest.json", json.dumps(manifest))
+    r = import_set_zip(client, buf.getvalue())
+    assert r.status_code == 422 and "tc_id" in r.json()["detail"]
+    assert client.get("/api/audio-sets").json() == []

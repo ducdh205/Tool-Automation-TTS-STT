@@ -184,3 +184,51 @@ def test_import_twice_gives_two_sets_and_one_wav(store, set_id, audio_dir, tmp_p
 def test_pack_name_is_filesystem_safe():
     name = pack_name({"name": 'a/b:c*"d'})
     assert name.endswith(".zip") and not any(ch in name for ch in '/:*"')
+
+
+def _bad_zip(tmp_path, bad_item=None, audio_set=None, entry_name=None):
+    """A zip whose first row is fine (with a WAV) and whose second row / set carries the bad value."""
+    manifest = _valid_manifest([_row("TC-1", "Đạt", audio="audio/ok.wav"), {**_row("TC-2", "Chờ"), **(bad_item or {})}])
+    manifest["audio_set"].update(audio_set or {})
+    entries = {"audio/ok.wav": WAV}
+    if entry_name:
+        manifest["items"][0]["audio"] = entry_name
+        entries = {entry_name: WAV}
+    return _zip(tmp_path / "in.zip", manifest, entries)
+
+
+@pytest.mark.parametrize("bad", [
+    {"tc_id": [1, 2]}, {"feature": {"a": 1}}, {"status": ["Đạt"]}, {"status": "foo"}, {"source_row": 2**70},
+    {"wer": "high"}, {"enabled": "yes"}, {"form_json": "nope"}, {"form_json": '{"a": 1}'},
+    {"ops_json": "{not json"}, {"ops_json": 5},
+])
+def test_rejects_item_values_the_db_cannot_hold(store, audio_dir, tmp_path, bad):
+    z = _bad_zip(tmp_path, bad_item=bad)
+    with pytest.raises(PackError):
+        import_audio_set_zip(store, z, audio_dir)
+    assert store.list_audio_sets() == []
+    assert list(audio_dir.iterdir()) == []  # validated before any WAV is copied
+
+
+@pytest.mark.parametrize("bad", [{"name": ["a"]}, {"sheets": "S1"}, {"sheets": [1]}, {"voice": 5},
+                                 {"source_file": {"x": 1}}])
+def test_rejects_bad_set_fields(store, audio_dir, tmp_path, bad):
+    z = _bad_zip(tmp_path, audio_set=bad)
+    with pytest.raises(PackError):
+        import_audio_set_zip(store, z, audio_dir)
+    assert store.list_audio_sets() == []
+    assert list(audio_dir.iterdir()) == []
+
+
+def test_wav_name_must_match_exactly_not_just_at_line_end(store, audio_dir, tmp_path):
+    z = _bad_zip(tmp_path, entry_name="audio/ab.wav\n")
+    with pytest.raises(PackError):
+        import_audio_set_zip(store, z, audio_dir)
+    assert store.list_audio_sets() == [] and list(audio_dir.iterdir()) == []
+
+
+def test_good_json_columns_round_trip_through_validation(store, audio_dir, tmp_path):
+    z = _bad_zip(tmp_path, bad_item={"form_json": json.dumps(["a", "b"]), "ops_json": "[]", "wer": 0.25,
+                                     "source_row": 7, "status": "Lỗi", "error": "boom"})
+    res = import_audio_set_zip(store, z, audio_dir)
+    assert store.form_cells(res["id"])[store.get_items(res["id"])[1]["id"]] == ["a", "b"]
