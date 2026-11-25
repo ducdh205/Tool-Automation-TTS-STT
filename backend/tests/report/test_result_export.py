@@ -100,3 +100,23 @@ def test_result_suffix(tmp_path):
     assert result_suffix({"source_path": str(xlsm)}) == ".xlsm"
     assert result_suffix({"source_path": str(tmp_path / "gone.xlsm")}) == ".xlsx"
     assert result_suffix({"source_path": None}) == ".xlsx"
+
+
+def test_unheaded_columns_are_not_overwritten(tmp_path, session):
+    src = Path(session.store.get_audio_set(session.set_id)["source_path"])
+    wb = openpyxl.load_workbook(src)
+    ws = wb[SHEET]
+    ws["D6"] = "ghi chú tay"
+    ws["E7"] = "=A7"
+    ws.auto_filter.ref = "A4:E8"
+    wb.save(src)
+    out = build(session, tmp_path)[SHEET]
+    assert out["D6"].value == "ghi chú tay" and out["E7"].value == "=A7"
+    assert [out[f"{c}4"].value for c in "FGH"] == RESULT_HEADERS
+    assert out["G6"].value == "Fail"
+    assert out.auto_filter.ref == "A4:H8"
+
+
+def test_only_overview_tab_selected(tmp_path, session):
+    wb = build(session, tmp_path)
+    assert [bool(ws.sheet_view.tabSelected) for ws in wb.worksheets] == [True, False]

@@ -53,7 +53,7 @@ describe("AppRunPanel", () => {
     expect((screen.getByRole("button", { name: "Xuất" }) as HTMLButtonElement).disabled).toBe(true);
     rerender(<AppRunPanel {...panel({ runs: [run], runId: 7, onExportForm, onExportZip })} />);
     fireEvent.click(screen.getByRole("button", { name: "Xuất" }));
-    fireEvent.click(screen.getByRole("button", { name: /^Excel theo form/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Excel kết quả/ }));
     fireEvent.click(screen.getByRole("button", { name: "Xuất" }));
     fireEvent.click(screen.getByRole("button", { name: /^Zip phiên/ }));
     expect(onExportForm).toHaveBeenCalled();

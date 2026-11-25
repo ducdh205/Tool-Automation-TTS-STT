@@ -109,7 +109,7 @@ export function AppRunPanel(p: Props) {
         {(_open, close) => (
           <div className="menu">
             <button className="menu-item" onClick={() => { close(); p.onExportForm(); }}>
-              Excel theo form<small>Kết quả thực tế, KQ ASR, Bằng chứng…</small>
+              Excel kết quả<small>File input gốc + cột Text app, Kết quả, Ghi chú</small>
             </button>
             <button className="menu-item" onClick={() => { close(); p.onExportZip(); }}>
               Zip phiên…<small>Mỗi testcase một folder: kết quả, log, ảnh, audio</small>

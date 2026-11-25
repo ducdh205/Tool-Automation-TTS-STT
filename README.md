@@ -59,8 +59,8 @@ Thanh trái có 2 bước. Nút **◐ / ☀ / ☾** ở chân thanh trái đổi
 
 ### Bước 1 — Audio
 
-1. **Nạp file** → chọn các sheet tính năng (form testcase 36 cột, header ở dòng 4, câu nói ở cột M).
-   File csv/xlsx khác form: chọn cột câu nói.
+1. **Nạp file** (xlsx/csv) → chọn các sheet tính năng, dòng header và cột câu nói (tool tự gợi ý theo tên cột).
+   Tool giữ một bản sao file gốc để xuất kết quả.
 2. Dòng không đọc được (dòng Hệ thống, chú thích trong ngoặc, ký tự lạ như `…`, `→`, `<script>`) tự chuyển
    **Không áp dụng**. Nhấp đúp ô *Câu đọc* để sửa và bật lại; nút **⏻** cuối dòng (hiện khi rê chuột) tạm loại / bật lại một câu.
    Biểu tượng ✎ cạnh câu đọc nghĩa là câu đọc khác câu gốc — rê chuột để xem câu gốc.
@@ -95,14 +95,15 @@ Không cài gì lên điện thoại (chỉ dùng `adb` có sẵn của Android)
    **Chạy tiếp** chạy lại các câu Chờ và Lỗi thao tác của phiên đang chọn. Ở Bước 2, bộ lọc trạng thái lọc theo
    kết quả app của phiên đang chọn; tỉ lệ Đúng hiện cạnh tên bộ audio.
 6. Xuất kết quả của phiên đang chọn (nút **Xuất ▾**):
-   - **Excel theo form** — file theo form testcase 36 cột, chỉ các case đã test: cột P *Kết quả thực tế*,
-     S *KQ ASR* (Pass/Fail), X *KẾT QUẢ TỔNG* (chỉ điền `Fail` khi app nghe sai), Z *Bằng chứng* (folder trong zip),
-     AA *Thông tin lần chạy*, AB *Ghi chú* (WER/CER, từ sai). File gốc không bị sửa.
+   - **Excel kết quả** — bản sao file input giữ nguyên định dạng, chỉ còn các sheet đã chọn; sheet đầu
+     *Tổng hợp phiên*; mỗi sheet thêm 3 cột sau cột cuối: *Text app nghe được*, *Kết quả* (Pass / Fail /
+     Lỗi thao tác), *Ghi chú* (WER, CER, từ sai). Bộ audio tạo trước khi có tính năng này hoặc input csv: bảng đơn giản.
+     File gốc không bị sửa.
    - **Zip phiên** — chọn audio kèm theo: chỉ case Sai / Lỗi thao tác (mặc định), tất cả, hoặc các case đang chọn:
 
      ```
      Phien12_2026-11-20_1530_<máy>/
-     ├── KetQua_<bộ audio>_Phien12.xlsx   (Excel theo form ở trên)
+     ├── KetQua_<bộ audio>_Phien12.xlsx   (Excel kết quả ở trên)
      ├── TongQuan.xlsx                    (báo cáo nhiều sheet: Khối 1 + Khối 2)
      ├── thong_tin_phien.txt              (máy, hồ sơ app, phiên bản app, giờ chạy, cài đặt)
      └── <Tên sheet>/

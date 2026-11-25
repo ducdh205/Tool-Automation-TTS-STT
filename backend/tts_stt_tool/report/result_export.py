@@ -66,14 +66,17 @@ def _write_results(ws: Any, row: int, first_col: int, result: dict[str, Any]) ->
         c.alignment = Alignment(vertical="top", wrap_text=_RESULT_WRAP[i])
 
 
-def _last_column(ws: Any, header_row: int) -> int:
-    cols = [c.column for c in ws[header_row] if c.value is not None]
+def _last_column(ws: Any, header_row: int, last_row: int) -> int:
+    """Last column holding a header or any value (notes / formulas without a header too) in the table."""
+    cols = [c.column for row in ws.iter_rows(min_row=header_row, max_row=max(header_row, last_row))
+            for c in row if c.value is not None]
     cols += [r.max_col for r in ws.merged_cells.ranges if r.min_row <= header_row <= r.max_row]
     return max(cols) if cols else ws.max_column
 
 
 def _fill_source_sheet(ws: Any, header_row: int, results: list[dict[str, Any]]) -> None:
-    last = _last_column(ws, header_row)
+    last_row = max([r.get("source_row") or 0 for r in results] + [ws.max_row])
+    last = _last_column(ws, header_row, last_row)
     model = ws.cell(row=header_row, column=last)
     for i, name in enumerate(RESULT_HEADERS):
         col = last + 1 + i
@@ -88,9 +91,9 @@ def _fill_source_sheet(ws: Any, header_row: int, results: list[dict[str, Any]]) 
         if r.get("source_row"):
             _write_results(ws, r["source_row"], last + 1, r)
     if ws.auto_filter.ref:
-        min_col, min_row, _, max_row = range_boundaries(ws.auto_filter.ref)
-        ws.auto_filter.ref = (f"{get_column_letter(min_col)}{min_row}:"
-                              f"{get_column_letter(last + len(RESULT_HEADERS))}{max_row}")
+        min_col, min_row, max_col, max_row = range_boundaries(ws.auto_filter.ref)
+        end = max(max_col, last + len(RESULT_HEADERS))
+        ws.auto_filter.ref = f"{get_column_letter(min_col)}{min_row}:{get_column_letter(end)}{max_row}"
 
 
 def _plain_sheet(wb: Any, name: str, results: list[dict[str, Any]]) -> None:
@@ -119,6 +122,8 @@ def _overview(wb: Any, store: Store, run_id: int, audio_set: dict[str, Any], res
     _app_overview(ws, store, run_id, results)
     ws.column_dimensions["A"].width = 30
     ws.column_dimensions["B"].width = 28
+    for other in wb.worksheets:  # a second selected tab would open the file with sheets grouped
+        other.sheet_view.tabSelected = other is ws
     wb.active = 0
 
 
