@@ -7,6 +7,7 @@ before the file was kept, file gone) every sheet is a plain table instead.
 
 from __future__ import annotations
 
+import re
 from copy import copy
 from pathlib import Path
 from typing import Any
@@ -110,6 +111,38 @@ def _plain_sheet(wb: Any, name: str, results: list[dict[str, Any]]) -> None:
     ws.freeze_panes = "A2"
 
 
+def _formulas(ws: Any) -> list[str]:
+    """Every formula text of a sheet: cells, dropdown lists, conditional formats, sheet-scoped names."""
+    out = [getattr(c.value, "text", c.value) for row in ws.iter_rows() for c in row if c.data_type == "f"]
+    for dv in ws.data_validations.dataValidation:
+        out += [f for f in (dv.formula1, dv.formula2) if f]
+    for cf in ws.conditional_formatting:
+        for rule in cf.rules:
+            out += list(rule.formula or [])
+    out += [d.attr_text for d in ws.defined_names.values() if d.attr_text]
+    return [str(f) for f in out if f]
+
+
+def _refers_to(text: str, sheet: str) -> bool:
+    quoted = "'" + sheet.replace("'", "''") + "'!"
+    return quoted in text or re.search(r"(?<![\w.'])" + re.escape(sheet) + "!", text) is not None
+
+
+def _referenced_sheets(wb: Any, kept: set[str]) -> set[str]:
+    """Unselected sheets the kept ones reach through formulas or defined names (e.g. a dropdown's list)."""
+    names = {n: d.attr_text for n, d in wb.defined_names.items() if d.attr_text}
+    found: set[str] = set()
+    todo = [ws for ws in wb.worksheets if ws.title in kept]
+    while todo:
+        text = "\n".join(f for ws in todo for f in _formulas(ws))
+        text += "\n" + "\n".join(v for n, v in names.items()
+                                 if re.search(r"(?<![\w.])" + re.escape(n) + r"(?![\w(])", text, re.I))
+        todo = [ws for ws in wb.worksheets
+                if ws.title not in kept | found and _refers_to(text, ws.title)]
+        found |= {ws.title for ws in todo}
+    return found
+
+
 def _overview(wb: Any, store: Store, run_id: int, audio_set: dict[str, Any], results: list[dict]) -> None:
     name, n = OVERVIEW_SHEET, 1
     while name in wb.sheetnames:
@@ -147,8 +180,11 @@ def build_result_report(store: Store, run_id: int, out_path: Path) -> Path:
             wb = None
     if wb is not None:
         keep = set(chosen) | set(by_sheet)
+        lookups = _referenced_sheets(wb, keep)  # removing them would turn dropdowns / formulas into #REF!
         for ws in list(wb.worksheets):
-            if ws.title not in keep:
+            if ws.title in lookups:
+                ws.sheet_state = "hidden"
+            elif ws.title not in keep:
                 wb.remove(ws)
         header_row = int(audio_set.get("header_row") or 1)
         for sheet in order:

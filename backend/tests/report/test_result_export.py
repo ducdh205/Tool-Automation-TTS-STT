@@ -120,3 +120,30 @@ def test_unheaded_columns_are_not_overwritten(tmp_path, session):
 def test_only_overview_tab_selected(tmp_path, session):
     wb = build(session, tmp_path)
     assert [bool(ws.sheet_view.tabSelected) for ws in wb.worksheets] == [True, False]
+
+
+def _source_with_lookups(session):
+    """Kept sheet uses: a formula on 'Danh mục', a dropdown via the name ListTT on 'Tra cứu'; 'Rác' is unused."""
+    from openpyxl.workbook.defined_name import DefinedName
+    from openpyxl.worksheet.datavalidation import DataValidation
+
+    src = Path(session.store.get_audio_set(session.set_id)["source_path"])
+    wb = openpyxl.load_workbook(src)
+    wb.create_sheet("Danh mục")["A1"] = "x"
+    wb.create_sheet("Tra cứu")["A1"] = "Pass"
+    wb.create_sheet("Rác")["A1"] = "y"
+    wb.defined_names["ListTT"] = DefinedName("ListTT", attr_text="'Tra cứu'!$A$1:$A$2")
+    ws = wb[SHEET]
+    ws["C9"] = "='Danh mục'!A1"
+    dv = DataValidation(type="list", formula1="=ListTT")
+    dv.add("B5:B8")
+    ws.add_data_validation(dv)
+    wb.save(src)
+
+
+def test_referenced_unselected_sheets_kept_hidden(tmp_path, session):
+    _source_with_lookups(session)
+    wb = build(session, tmp_path)
+    assert wb.sheetnames == [OVERVIEW_SHEET, SHEET, "Danh mục", "Tra cứu"]
+    assert [wb[s].sheet_state for s in wb.sheetnames] == ["visible", "visible", "hidden", "hidden"]
+    assert wb[SHEET]["C9"].value == "='Danh mục'!A1"
