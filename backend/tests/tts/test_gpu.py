@@ -102,3 +102,13 @@ async def test_install_without_uv_fails():
     st = await wait_install(gpu)
     assert st["state"] == "failed"
     assert st["error"] == "Không tìm thấy uv"
+
+
+def test_default_install_replaces_an_existing_cpu_torch(monkeypatch):
+    import tts_stt_tool.tts.gpu as gpu_mod
+
+    monkeypatch.setattr(gpu_mod.shutil, "which", lambda name: "C:/uv.exe" if name == "uv" else None)
+    cmd = gpu_mod.default_install_cmd()
+    assert cmd[:3] == ["C:/uv.exe", "pip", "install"]
+    assert cmd[cmd.index("--reinstall-package") + 1] == "torch"
+    assert cmd[cmd.index("--index-url") + 1] == "https://download.pytorch.org/whl/cu128"

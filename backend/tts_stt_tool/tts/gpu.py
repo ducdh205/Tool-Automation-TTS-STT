@@ -32,7 +32,9 @@ def default_install_cmd() -> list[str] | None:
     uv = shutil.which("uv")
     if uv is None:
         return None
-    return [uv, "pip", "install", "--python", sys.executable, "torch", "--index-url", TORCH_CUDA_INDEX]
+    # --reinstall-package: a CPU-only torch already in the venv would otherwise count as "satisfied".
+    return [uv, "pip", "install", "--python", sys.executable, "--reinstall-package", "torch", "torch",
+            "--index-url", TORCH_CUDA_INDEX]
 
 
 async def _run(cmd: list[str], timeout: float = 60) -> tuple[int, str]:

@@ -502,15 +502,6 @@ async def install_cuda(request: Request) -> dict[str, Any]:
     return await _tts_device_json(ctx)
 
 
-def _gpu_available() -> bool:
-    try:
-        import torch  # optional
-
-        return bool(torch.cuda.is_available())
-    except Exception:
-        return False
-
-
 # -- device -------------------------------------------------------------------
 @router.get("/device")
 async def device_status(request: Request) -> dict[str, Any]:
@@ -777,5 +768,5 @@ async def health(request: Request) -> dict[str, Any]:
         from tts_stt_tool.stt.server_manager import port_open
 
         up = await port_open(ctx.settings.wyoming_host, ctx.settings.wyoming_port, 0.5)
-    return {"wyoming": up, "wyoming_error": ctx.wyoming_error, "gpu": _gpu_available(),
+    return {"wyoming": up, "wyoming_error": ctx.wyoming_error, "gpu": (await ctx.gpu.probe()).torch_cuda,
             "job": ctx.runner.current()}

@@ -159,3 +159,9 @@ def test_install_cuda_without_nvidia_400(setup):
     r = c.post("/api/tts/install-cuda")
     assert r.status_code == 400
     assert r.json()["detail"] == "Máy không có GPU NVIDIA"
+
+
+def test_health_gpu_comes_from_the_probe_not_an_in_process_import(setup):
+    """Importing torch in the server process would lock its DLLs on Windows and block reinstalling it."""
+    c, _ = setup(GpuSetup(nvidia_cmd=NVIDIA, torch_cmd=exits(0), install_cmd=exits(0)))
+    assert c.get("/api/health").json()["gpu"] is True
