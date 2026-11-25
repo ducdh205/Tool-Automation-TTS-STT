@@ -38,7 +38,9 @@ Lần chạy đầu sẽ tải model từ Hugging Face (cần mạng): VieNeu ~2
 
 ### GPU (tùy chọn)
 
-Mặc định VieNeu chạy CPU (~1–2 giây/câu). Nếu máy có GPU NVIDIA, cài torch CUDA để nhanh hơn:
+Mặc định VieNeu chạy CPU (~1–2 giây/câu). Nếu máy có card NVIDIA, chọn **GPU** trong bảng
+**Thiết bị kiểm thử** (chân sidebar): app kiểm tra PyTorch CUDA, nếu chưa có thì hỏi rồi tự cài
+(~2.5 GB) ở nền và chuyển sang GPU khi xong. Driver NVIDIA phải cài sẵn. Cài tay (dự phòng):
 
 ```bash
 uv pip install torch --index-url https://download.pytorch.org/whl/cu128
