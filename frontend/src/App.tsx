@@ -28,7 +28,9 @@ function countBy<T>(rows: Iterable<T>, key: (r: T) => string | undefined): Recor
 }
 
 const step1Selectable = (it: Item) => !!it.enabled && !!it.text_tts;
-const step2Selectable = (it: Item) => it.status === "Đạt";
+// Step 2 tests every row with audio, verified or not; the verify result is shown beside it.
+const step2Listed = (it: Item) => !!it.audio_path && it.status !== "Không áp dụng";
+const step2Selectable = (it: Item) => step2Listed(it) && !!it.enabled;
 
 export default function App() {
   const [section, setSection] = useState<Section>("step1");
@@ -93,23 +95,35 @@ export default function App() {
     api.settings().then(setSettings).catch(() => setSettingsLoadFailed(true));
   }, []);
 
-  const saveSettings = async (changes: Partial<Settings>, purgeSets = false) => {
+  const saveProfile = async (p: AppProfile) => {
+    try {
+      const saved = await api.saveProfile(p);
+      setProfiles((ps) => ps.map((x) => (x.name === saved.name ? saved : x)));
+      notify(`Đã lưu: nghỉ ${saved.between_delay_s ?? 0}s giữa các câu (${saved.name}).`);
+    } catch (e) {
+      notifyError(e);
+      throw e;
+    }
+  };
+
+  const saveSettings = async (changes: Partial<Settings>, resetProgress = false) => {
     if (!settings) return;
     setSettingsSaving(true);
     try {
       setSettings(await api.saveSettings({ ...settings, ...changes }));
-      if (!purgeSets) {
+      if (!resetProgress) {
         notify("Đã lưu cài đặt.");
         return;
       }
-      // Settings are saved either way; a failed delete is reported, not thrown back into the panel.
-      const old = [...sets];
-      let failed = 0;
-      for (const s of old) await api.deleteSet(s.id).catch(() => { failed += 1; });
-      const left = await loadSets().catch(() => [] as AudioSet[]);
-      setSetId(left[0]?.id ?? null);
-      if (failed) notify(`Đã lưu cài đặt, nhưng ${failed}/${old.length} bộ audio cũ chưa xóa được.`, "error");
-      else notify(`Đã lưu cài đặt và xóa ${old.length} bộ audio cũ.`);
+      // Settings are saved either way; a failed reset is reported, not thrown back into the panel.
+      try {
+        await api.resetProgress();
+        notify("Đã lưu cài đặt và xóa toàn bộ tiến trình cũ.");
+      } catch (e) {
+        notify(`Đã lưu cài đặt, nhưng chưa xóa được tiến trình cũ: ${(e as Error).message}`, "error");
+      }
+      const open = setIdRef.current;
+      await Promise.all([loadSets(), open !== null && loadItems(open), open !== null && loadAppRuns(open)]).catch(() => {});
     } finally {
       setSettingsSaving(false);
     }
@@ -205,7 +219,7 @@ export default function App() {
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
     return items.filter((it) =>
-      (!appMode || it.status === "Đạt") &&
+      (!appMode || step2Listed(it)) &&
       (filter === "all" || statusOf(it) === filter) &&
       (!q || it.text_raw.toLowerCase().includes(q) || it.tc_id.toLowerCase().includes(q) ||
         (it.text_tts ?? "").toLowerCase().includes(q)));
@@ -335,9 +349,10 @@ export default function App() {
 
   const current = sets.find((s) => s.id === setId);
   const currentRun = appRuns.find((r) => r.id === appRunId);
-  const passedItems = items.filter(step2Selectable);
-  const summary = appMode ? countBy(passedItems, (it) => appResults.get(it.id)?.status) : countBy(items, (it) => it.status);
-  const total = appMode ? passedItems.length : items.length;
+  const listedItems = items.filter(step2Listed);
+  const readyCount = items.filter(step2Selectable).length;
+  const summary = appMode ? countBy(listedItems, (it) => appResults.get(it.id)?.status) : countBy(items, (it) => it.status);
+  const total = appMode ? listedItems.length : items.length;
 
   // Headline numbers next to the title: what the user checks after every run.
   let kpis = null;
@@ -363,7 +378,7 @@ export default function App() {
       </>
     );
   } else if (current) {
-    kpis = <span className="kpi"><b>{passedItems.length}</b> câu Đạt sẵn sàng</span>;
+    kpis = <span className="kpi"><b>{readyCount}</b> câu có audio sẵn sàng</span>;
   }
 
   return (
@@ -432,11 +447,12 @@ export default function App() {
             runs={appRuns}
             runId={appRunId}
             busy={!!job || settingsSaving}
-            passedCount={passedItems.length}
+            readyCount={readyCount}
             selectedCount={sel2.ids.size}
             onExportForm={exportForm}
             onExportZip={() => setDialog("zip")}
             onStart={startApp}
+            onSaveProfile={saveProfile}
             onResume={resumeApp}
             onSelectRun={setAppRunId}
           />
@@ -451,7 +467,7 @@ export default function App() {
           <ItemTable
             items={visible}
             onPatch={patch}
-            app={appMode && appRunId !== null ? appResults : undefined}
+            app={appMode ? appResults : undefined}
             showSheet={(current?.sheets.length ?? 0) > 1}
             selected={selection.ids}
             isSelectable={isSelectable}

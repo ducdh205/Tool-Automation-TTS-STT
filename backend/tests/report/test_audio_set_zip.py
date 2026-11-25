@@ -231,4 +231,5 @@ def test_good_json_columns_round_trip_through_validation(store, audio_dir, tmp_p
     z = _bad_zip(tmp_path, bad_item={"form_json": json.dumps(["a", "b"]), "ops_json": "[]", "wer": 0.25,
                                      "source_row": 7, "status": "Lỗi", "error": "boom"})
     res = import_audio_set_zip(store, z, audio_dir)
-    assert store.form_cells(res["id"])[store.get_items(res["id"])[1]["id"]] == ["a", "b"]
+    row = store.export_audio_set(res["id"])["items"][1]
+    assert row["form_json"] == json.dumps(["a", "b"]) and row["status"] == "Lỗi" and row["wer"] == 0.25

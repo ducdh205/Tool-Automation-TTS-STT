@@ -95,7 +95,7 @@ def test_preview_header_row_out_of_range(mini_form):
         preview_sheet(mini_form, FORM_SHEET, 99)
 
 
-def test_form_header_keeps_form_cells(mini_form):
+def test_form_header_read_like_any_sheet(mini_form):
     items = read_items(mini_form, [FORM_SHEET], FORM_MAPPING)
     assert [(i.tc_id, i.turn, i.text_raw) for i in items] == [
         ("TC-SYN-001", "1", "Đồng bộ nhiệt độ tất cả các vùng"),
@@ -104,9 +104,9 @@ def test_form_header_keeps_form_cells(mini_form):
     ]
     first = items[0]
     assert (first.source_row, first.region, first.expected, first.feature, first.priority) == (
-        5, "BAC-HN", "expected", "Climate Sync", "P0 - Smoke")
+        5, "BAC-HN", "expected", "", "")
     assert first.speaker == DEFAULT_SPEAKER
-    assert len(first.form) == 36 and first.form[2] == "UC" and first.form[35] == ""
+    assert not hasattr(first, "form")
 
 
 def test_blank_id_rows_skipped_when_id_mapped(mini_form):
@@ -119,7 +119,7 @@ def test_region_value_and_defaults(tmp_path):
     p = tmp_path / "a.csv"
     p.write_text("cau\nBật đèn\n", encoding="utf-8")
     i = read_items(p, [], ColumnMapping(text_col="cau", region_value="NAM-HCM"))[0]
-    assert (i.region, i.turn, i.tc_id, i.expected, i.form, i.speaker) == ("NAM-HCM", "1", "2", "", [], DEFAULT_SPEAKER)
+    assert (i.region, i.turn, i.tc_id, i.expected, i.speaker) == ("NAM-HCM", "1", "2", "", DEFAULT_SPEAKER)
 
 
 def test_multiple_sheets_and_missing_column(tmp_path):

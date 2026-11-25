@@ -4,12 +4,15 @@ export interface WordOp { op: OpKind; ref: string | null; hyp: string | null }
 export type ItemStatus = "Chờ" | "Không áp dụng" | "Đã sinh audio" | "Đạt" | "Audio không đạt" | "Lỗi";
 export const STATUSES: ItemStatus[] = ["Chờ", "Không áp dụng", "Đã sinh audio", "Đạt", "Audio không đạt", "Lỗi"];
 
+/** Block 1 STT check of a row's audio; Block 2 tests every row with audio and shows this beside it. */
+export type VerifyStatus = "Đạt" | "Không đạt" | "Chưa";
+
 export interface Item {
   id: number; audio_set_id: number; sheet: string; tc_id: string; turn: string; feature: string;
   priority: string; region: string; speaker: string; expected: string; source_row: number;
   text_raw: string; text_tts: string | null; skip_reason: string | null; enabled: number;
   status: ItemStatus; audio_path: string | null; attempts: number; ref_text: string | null;
-  wer: number | null; cer: number | null; ops: WordOp[]; error: string | null;
+  wer: number | null; cer: number | null; ops: WordOp[]; error: string | null; verify: VerifyStatus;
 }
 
 export interface AudioSet {
@@ -28,7 +31,9 @@ export interface ColumnMapping {
 }
 
 export interface Settings {
-  voice: string | null; voice_trung: string | null; voice_nam: string | null; max_regen: number; wer_threshold: number; reject_warn_ratio: number;
+  voice: string | null; voice_trung: string | null; voice_nam: string | null;
+  /** 1 = as synthesized; 0.7–1.3, pitch kept (Block 1 time-stretches the audio). */
+  voice_speed?: number; max_regen: number; wer_threshold: number; reject_warn_ratio: number;
   wyoming_host: string; wyoming_port: number; stt_timeout_s: number; wyoming_cmd: string[]; port: number;
 }
 export interface Health { wyoming: boolean; wyoming_error: string | null; gpu: boolean; job: Job | null }
@@ -42,6 +47,13 @@ export type DeviceInputBody =
   | { action: "key"; key: DeviceKey }
   | { action: "text"; text: string };
 export interface DeviceStatus { adb: boolean; error: string | null; devices: DeviceInfo[]; busy?: string | null }
+export type TtsDeviceKind = "cpu" | "cuda";
+export interface CudaInstall { state: "idle" | "running" | "done" | "failed"; log_tail: string[]; error: string | null }
+/** GET /api/tts/device: chosen and loaded TTS device, NVIDIA / PyTorch CUDA probe, installer state. */
+export interface TtsDevice {
+  device: TtsDeviceKind; active: TtsDeviceKind | null; load_error: string | null;
+  nvidia: boolean; gpu_name: string | null; torch_cuda: boolean; uv: boolean; install: CudaInstall;
+}
 
 export interface ProgressEvent {
   job_id: string; kind: "item" | "progress" | "log" | "done" | "error" | "cancelled";
@@ -52,6 +64,8 @@ export interface AppProfile {
   name: string; package: string; open_label: string; stop_label: string; idle_label: string;
   close_label: string; sheet_label: string; discard_label?: string; pre_delay_s: number; post_delay_s: number;
   listen_timeout_s: number; result_timeout_s: number;
+  /** Pause between two sentences of a Block 2 run (seconds). */
+  between_delay_s?: number;
 }
 export type AppStatus = "Chờ" | "Đúng" | "Sai" | "Lỗi thao tác";
 export interface AppRun {
@@ -61,6 +75,7 @@ export interface AppRun {
 export interface AppResult {
   id: number; app_run_id: number; item_id: number; status: AppStatus; app_text: string | null;
   wer: number | null; cer: number | null; ops: WordOp[]; error: string | null; log: string | null;
+  verify?: VerifyStatus;
 }
 export interface UiNodeInfo { label: string; cls: string; bounds: number[]; clickable: boolean }
 
@@ -117,6 +132,8 @@ export const api = {
     return req<{ id: number; missing_audio: number }>("POST", "/api/audio-sets/import", fd);
   },
   /** Every set + its WAVs, app runs, screenshots, reports and uploads; keeps settings and profiles. 409 while a job runs. */
+  /** Back to "Chờ" for every row of every set: drops WAVs, STT/WER results and app runs, keeps imported rows. 409 while a job runs. */
+  resetProgress: () => req<{ ok: boolean; items: number }>("DELETE", "/api/progress"),
   clearAllData: () => req<{ ok: boolean; sets: number }>("DELETE", "/api/data"),
   items: (setId: number) => req<Item[]>("GET", `/api/audio-sets/${setId}/items`),
   patchItem: (id: number, patch: { text_tts?: string; enabled?: boolean }) =>
@@ -132,8 +149,12 @@ export const api = {
   settings: () => req<Settings>("GET", "/api/settings"),
   saveSettings: (s: Settings) => req<Settings>("PUT", "/api/settings", s),
   voices: () => req<Voice[]>("GET", "/api/voices"),
-  voicePreviewUrl: (id: string) => `/api/voices/preview?voice_id=${encodeURIComponent(id)}`,
+  voicePreviewUrl: (id: string, speed = 1) =>
+    `/api/voices/preview?voice_id=${encodeURIComponent(id)}${speed === 1 ? "" : `&speed=${speed}`}`,
   health: () => req<Health>("GET", "/api/health"),
+  ttsDevice: () => req<TtsDevice>("GET", "/api/tts/device"),
+  setTtsDevice: (device: TtsDeviceKind) => req<TtsDevice>("PUT", "/api/tts/device", { device }),
+  installCuda: () => req<TtsDevice>("POST", "/api/tts/install-cuda"),
   profiles: () => req<AppProfile[]>("GET", "/api/profiles"),
   saveProfile: (p: AppProfile) => req<AppProfile>("PUT", `/api/profiles/${encodeURIComponent(p.name)}`, p),
   appRuns: (setId: number) => req<AppRun[]>("GET", `/api/audio-sets/${setId}/app-runs`),

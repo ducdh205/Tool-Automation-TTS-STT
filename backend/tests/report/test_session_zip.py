@@ -61,14 +61,11 @@ def test_missing_audio_is_noted_not_fatal(tmp_path, session):
     assert "Không tìm thấy file audio" in z.read(f"{root}/{SHEET}/FAIL_TC2/luot1_ketqua.txt").decode("utf-8-sig")
 
 
-def test_zip_paths_match_form_evidence(tmp_path, session):
+def test_zip_result_workbook(tmp_path, session):
     z, names, root = open_zip(session, tmp_path)
-    xlsx = next(n for n in names if "/KetQua_" in n)
-    ws = openpyxl.load_workbook(io.BytesIO(z.read(xlsx)))[SHEET]
-    evidence = [ws[f"Z{r}"].value for r in range(5, ws.max_row + 1)]
-    assert len(evidence) == 3
-    for folder in evidence:
-        assert f"{root}/{folder}luot1_ketqua.txt" in names
+    wb = openpyxl.load_workbook(io.BytesIO(z.read(f"{root}/KetQua_Bộ điều khiển_Phien{session.run_id}.xlsx")))
+    assert wb.sheetnames == ["Tổng hợp phiên", SHEET]
+    assert wb[SHEET]["E6"].value == "Fail"
 
 
 def test_profile_written_when_given(tmp_path, session):

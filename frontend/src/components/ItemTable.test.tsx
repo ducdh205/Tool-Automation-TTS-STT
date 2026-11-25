@@ -7,7 +7,7 @@ function makeItem(i: number, over: Partial<Item> = {}): Item {
     id: i + 1, audio_set_id: 1, sheet: "Sheet A", tc_id: `TC-${i}`, turn: "1", feature: "", priority: "",
     region: "BAC-HN", speaker: "👤 Người dùng", expected: "", source_row: 5 + i,
     text_raw: `câu ${i}`, text_tts: `câu ${i}`, skip_reason: null, enabled: 1, status: "Chờ",
-    audio_path: null, attempts: 0, ref_text: null, wer: null, cer: null, ops: [], error: null,
+    audio_path: null, attempts: 0, ref_text: null, wer: null, cer: null, ops: [], error: null, verify: "Chưa",
     ...over,
   };
 }
@@ -131,7 +131,7 @@ describe("app mode layout", () => {
     const { container } = render(<ItemTable items={[makeItem(0, { status: "Đạt" })]} onPatch={() => {}} app={new Map()} />);
     expect(container.querySelector(".table")?.classList.contains("app")).toBe(true);
     expect(container.querySelector(".row-actions")).toBeNull();
-    expect(container.querySelector(".row.head")?.children.length).toBe(6);
+    expect(container.querySelector(".row.head")?.children.length).toBe(7); // + Verify, no actions
   });
 });
 
@@ -165,5 +165,18 @@ describe("app mode is read-only (review2 #6)", () => {
     render(<ItemTable items={[item]} onPatch={() => {}} app={new Map()} />);
     fireEvent.doubleClick(screen.getByText("câu 0", { selector: ".cell-tts span" }));
     expect(screen.queryByDisplayValue("câu 0")).toBeNull();
+  });
+
+  it("shows the verify result of each row in step 2", () => {
+    const rows = [
+      makeItem(0, { audio_path: "a.wav", status: "Đạt", verify: "Đạt" }),
+      makeItem(1, { audio_path: "b.wav", status: "Audio không đạt", verify: "Không đạt" }),
+      makeItem(2, { audio_path: "c.wav", status: "Đã sinh audio", verify: "Chưa" }),
+    ];
+    render(<ItemTable items={rows} onPatch={() => {}} app={new Map()} />);
+    expect(screen.getByText("Verify")).toBeTruthy();
+    expect(screen.getByTitle("Verify audio: Đạt").className).toContain("st-pass");
+    expect(screen.getByTitle("Verify audio: Không đạt").className).toContain("st-fail");
+    expect(screen.getByTitle("Verify audio: Chưa").className).toContain("st-pending");
   });
 });

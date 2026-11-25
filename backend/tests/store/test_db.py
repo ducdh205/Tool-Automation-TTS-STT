@@ -151,19 +151,6 @@ def test_record_generated_clears_verify(store, staged):
     assert it["attempts"] == 2
 
 
-def test_form_cells_kept_but_not_in_payload(store):
-    form = [""] * 36
-    form[12] = "Bật ionizer"
-    item = _item("TC-1", "Bật ionizer")
-    item.form = form
-    set_id = store.create_audio_set("f", "f.xlsx", ["S1"], "v", [item, _item("TC-2", "tắt")])
-    first, second = (i["id"] for i in store.get_items(set_id))
-    cells = store.form_cells(set_id)
-    assert cells[first][12] == "Bật ionizer"
-    assert second not in cells
-    assert "form_json" not in store.get_item(first) and "form" not in store.get_item(first)
-
-
 def test_migrates_old_schema(tmp_path):
     import sqlite3
 
@@ -258,18 +245,16 @@ def test_import_audio_set_makes_name_unique(store, set_id):
     assert store.get_audio_set(set_id)["name"] == "bộ 1"
 
 
-def test_export_audio_set_keeps_form_cells(store):
-    form = [""] * 36
-    form[12] = "Bật ionizer"
-    item = _item("TC-1", "Bật ionizer")
-    item.form = form
-    sid = store.create_audio_set("f", "f.xlsx", ["S1"], "v", [item, _item("TC-2", "tắt")])
+def test_export_audio_set_keeps_legacy_form_json(store, set_id):
+    """Sets made before the 36-column form was dropped still carry form_json: it must survive the trip."""
+    first = store.get_items(set_id)[0]["id"]
+    with store._conn() as c:
+        c.execute("UPDATE items SET form_json=? WHERE id=?", ('["a", "b"]', first))
 
-    new_id = _roundtrip(store, sid)
+    new_id = _roundtrip(store, set_id)
 
-    old_cells = list(store.form_cells(sid).values())
-    new_cells = list(store.form_cells(new_id).values())
-    assert new_cells == old_cells and new_cells[0][12] == "Bật ionizer"
+    assert [i["form_json"] for i in store.export_audio_set(new_id)["items"]] ==         [i["form_json"] for i in store.export_audio_set(set_id)["items"]]
+    assert store.export_audio_set(new_id)["items"][0]["form_json"] == '["a", "b"]'
 
 
 def test_export_unknown_audio_set_returns_none(store):
@@ -281,3 +266,43 @@ def test_import_does_not_copy_app_runs(store, set_id):
     new_id = _roundtrip(store, set_id)
     assert store.list_app_runs(new_id) == []
     assert len(store.list_app_runs(set_id)) == 1
+
+def test_reset_progress_keeps_rows_and_clears_results(store, set_id):
+    before = store.get_items(set_id)
+    item = store.items_for_generate(set_id, None)[0]
+    store.record_generated(item["id"], "/a/x.wav", 2)
+    run_id = store.create_app_run(set_id, "SER", None, "p", None)
+
+    store.reset_progress()
+
+    after = store.get_items(set_id)
+    assert [i["id"] for i in after] == [i["id"] for i in before]
+    assert [i["status"] for i in after] == [i["status"] for i in before]  # "Không áp dụng" stays
+    assert all(i["audio_path"] is None and i["error"] is None and i["attempts"] == 0 for i in after)
+    assert store.get_app_run(run_id) is None
+
+
+def test_set_source_roundtrip(store, set_id):
+    s = store.get_audio_set(set_id)
+    assert s["source_path"] is None and s["header_row"] is None
+    store.set_source(set_id, "x/a.xlsx", 3)
+    s = store.get_audio_set(set_id)
+    assert s["source_path"] == "x/a.xlsx" and s["header_row"] == 3
+
+
+def test_old_db_gets_source_columns(tmp_path):
+    import sqlite3
+
+    path = tmp_path / "old.db"
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        "CREATE TABLE audio_sets (id INTEGER PRIMARY KEY, name TEXT NOT NULL, source_file TEXT NOT NULL,"
+        " sheets_json TEXT NOT NULL, voice TEXT, created_at TEXT NOT NULL);"
+        "INSERT INTO audio_sets(name, source_file, sheets_json, created_at) VALUES ('a', 'a.xlsx', '[]', 'x');"
+    )
+    conn.close()
+    store = Store(path)
+    s = store.get_audio_set(1)
+    assert s["source_path"] is None and s["header_row"] is None
+    store.set_source(1, "a.xlsx", 2)
+    assert store.get_audio_set(1)["header_row"] == 2

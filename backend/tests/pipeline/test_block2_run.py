@@ -174,3 +174,55 @@ async def test_screenshot_save_failure_keeps_result(env, tmp_path):
     assert row["status"] == AppStatus.FAILED.value and row["screenshot_path"] is None
     assert "Không lưu được ảnh" in row["log"]
     assert events[-1].kind == "done"
+
+
+async def test_between_delay_separates_sentences(env):
+    store, run_id, settings = env
+    pauses = []
+
+    async def pause(seconds, cancel):
+        pauses.append(seconds)
+
+    total = len(store.app_results(run_id))
+    await run_block2(store, run_id, object(), AppProfile(between_delay_s=2.5), object(), settings,
+                     lambda e: None, asyncio.Event(), run_one=scripted({}), pause=pause)
+    assert pauses == [2.5] * (total - 1)  # between sentences only: none before the first or after the last
+
+
+async def test_no_pause_by_default(env):
+    store, run_id, settings = env
+    pauses = []
+
+    async def pause(seconds, cancel):
+        pauses.append(seconds)
+
+    await run_block2(store, run_id, object(), AppProfile(), object(), settings,
+                     lambda e: None, asyncio.Event(), run_one=scripted({}), pause=pause)
+    assert pauses == []
+
+
+async def test_cancel_during_pause_stops_the_run(env):
+    store, run_id, settings = env
+    cancel = asyncio.Event()
+    events = []
+
+    async def pause(seconds, ev):
+        ev.set()  # user presses Hủy while the tool waits between sentences
+
+    await run_block2(store, run_id, object(), AppProfile(between_delay_s=5), object(), settings,
+                     events.append, cancel, run_one=scripted({}), pause=pause)
+    assert events[-1].kind == "cancelled" and events[-1].done == 1
+
+
+async def test_pause_unless_cancelled_returns_early():
+    from tts_stt_tool.pipeline.block2 import pause_unless_cancelled
+
+    cancel = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    loop.call_later(0.05, cancel.set)
+    start = loop.time()
+    await pause_unless_cancelled(10, cancel)
+    assert loop.time() - start < 1
+    start = loop.time()
+    await pause_unless_cancelled(0.05, asyncio.Event())
+    assert loop.time() - start >= 0.04

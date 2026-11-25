@@ -26,6 +26,22 @@ class ItemStatus(StrEnum):
     ERROR = "Lỗi"
 
 
+class VerifyStatus(StrEnum):
+    """Block 1 STT check of a row's audio, shown next to it in Block 2 (which tests every row with audio)."""
+
+    PASSED = "Đạt"
+    FAILED = "Không đạt"
+    NOT_YET = "Chưa"
+
+
+def verify_status(item_status: str | None) -> str:
+    if item_status == ItemStatus.PASSED.value:
+        return VerifyStatus.PASSED.value
+    if item_status == ItemStatus.AUDIO_FAILED.value:
+        return VerifyStatus.FAILED.value
+    return VerifyStatus.NOT_YET.value
+
+
 class AppStatus(StrEnum):
     PENDING = "Chờ"
     PASSED = "Đúng"
@@ -42,7 +58,9 @@ CREATE TABLE IF NOT EXISTS audio_sets (
     voice TEXT,
     voice_trung TEXT,
     voice_nam TEXT,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    source_path TEXT,
+    header_row INTEGER
 );
 CREATE TABLE IF NOT EXISTS items (
     id INTEGER PRIMARY KEY,
@@ -79,7 +97,7 @@ CREATE INDEX IF NOT EXISTS ix_app_results_run ON app_results(app_run_id, id);
 _RESULT_SELECT = (
     # text/audio as they were when the run was created: later edits must not change what was tested
     "SELECT r.*, i.sheet, i.tc_id, i.turn, i.feature, i.priority, i.text_raw, i.source_row, i.speaker,"
-    " i.region, i.expected,"
+    " i.region, i.expected, i.status AS item_status,"
     " COALESCE(r.text_tts_snap, i.text_tts) AS text_tts, COALESCE(r.audio_snap, i.audio_path) AS audio_path"
     " FROM app_results r JOIN items i ON i.id = r.item_id"
 )
@@ -95,6 +113,10 @@ _RESET_SQL = (
 )
 
 
+# a row Block 2 can play: generated (verified or not), still enabled
+_HAS_AUDIO = "enabled=1 AND audio_path IS NOT NULL AND status<>?"
+
+
 def _now() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
@@ -102,7 +124,9 @@ def _now() -> str:
 def _item_row(row: sqlite3.Row) -> dict[str, Any]:
     d = dict(row)
     d["ops"] = json.loads(d.pop("ops_json")) if d.get("ops_json") else []
-    d.pop("form_json", None)  # up to 36 cells per row: only the form export reads it (Store.form_cells)
+    d.pop("form_json", None)  # legacy column of the old 36-column form export, no longer read
+    # an app result carries its item's Block 1 status as item_status; an item row has it as status
+    d["verify"] = verify_status(d.pop("item_status") if "item_status" in d else d.get("status"))
     return d
 
 
@@ -122,6 +146,10 @@ class Store:
                 for col in added:
                     if col not in cols:
                         c.execute(f"ALTER TABLE {table} ADD COLUMN {col} TEXT")
+            cols = {r["name"] for r in c.execute("PRAGMA table_info(audio_sets)")}
+            for col, kind in (("source_path", "TEXT"), ("header_row", "INTEGER")):
+                if col not in cols:
+                    c.execute(f"ALTER TABLE audio_sets ADD COLUMN {col} {kind}")
 
     @contextmanager
     def _conn(self) -> Iterator[sqlite3.Connection]:
@@ -156,15 +184,25 @@ class Store:
                     set_id, it.sheet, it.tc_id, it.turn, it.feature, it.priority, it.region,
                     it.speaker, it.expected, it.source_row, it.text_raw, text_tts, reason,
                     0 if reason else 1, status.value, _now(),
-                    json.dumps(it.form, ensure_ascii=False) if it.form else None,
                 ))
             c.executemany(
                 "INSERT INTO items(audio_set_id, sheet, tc_id, turn, feature, priority, region, speaker,"
-                " expected, source_row, text_raw, text_tts, skip_reason, enabled, status, updated_at, form_json)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                " expected, source_row, text_raw, text_tts, skip_reason, enabled, status, updated_at)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 rows,
             )
             return set_id
+
+    def set_source(self, audio_set_id: int, source_path: str | None, header_row: int) -> None:
+        """The kept copy of the input file (None for csv) and its header row, used by the result export."""
+        with self._conn() as c:
+            c.execute("UPDATE audio_sets SET source_path=?, header_row=? WHERE id=?",
+                      (source_path, header_row, audio_set_id))
+
+    def set_voices(self, audio_set_id: int, voice: str | None, voice_trung: str | None, voice_nam: str | None) -> None:
+        with self._conn() as c:
+            c.execute("UPDATE audio_sets SET voice=?, voice_trung=?, voice_nam=? WHERE id=?",
+                      (voice, voice_trung, voice_nam, audio_set_id))
 
     def list_audio_sets(self) -> list[dict[str, Any]]:
         with self._conn() as c:
@@ -249,12 +287,30 @@ class Store:
                 f"INSERT INTO items(audio_set_id, {', '.join(cols)}) VALUES (?{',?' * len(cols)})", rows)
             return set_id
 
+    def reset_progress(self) -> int:
+        """Put every row of every set back to "Chờ" and drop all app runs; imported rows stay.
+
+        Rows marked "Không áp dụng" keep that status. Returns how many rows were reset.
+        """
+        with self._conn() as c:
+            c.execute("DELETE FROM app_runs")
+            c.execute(f"UPDATE items SET {_RESET_SQL}, updated_at=? WHERE status=?",
+                      (_now(), ItemStatus.SKIPPED.value))
+            return c.execute(f"UPDATE items SET status=?, {_RESET_SQL}, updated_at=? WHERE status<>?",
+                             (ItemStatus.PENDING.value, _now(), ItemStatus.SKIPPED.value)).rowcount
+
     def summary(self, audio_set_id: int) -> dict[str, int]:
         with self._conn() as c:
             rows = c.execute(
                 "SELECT status, COUNT(*) n FROM items WHERE audio_set_id=? GROUP BY status", (audio_set_id,)
             ).fetchall()
         return {r["status"]: r["n"] for r in rows}
+
+    def count_with_audio(self, audio_set_id: int) -> int:
+        """Rows ready for Block 2 (see ``create_app_run``)."""
+        with self._conn() as c:
+            return c.execute(f"SELECT COUNT(*) FROM items WHERE audio_set_id=? AND {_HAS_AUDIO}",
+                             (audio_set_id, ItemStatus.SKIPPED.value)).fetchone()[0]
 
     # -- items ------------------------------------------------------------
     def get_items(self, audio_set_id: int, status: ItemStatus | None = None) -> list[dict[str, Any]]:
@@ -270,14 +326,6 @@ class Store:
         with self._conn() as c:
             r = c.execute("SELECT * FROM items WHERE id=?", (item_id,)).fetchone()
         return _item_row(r) if r else None
-
-    def form_cells(self, audio_set_id: int) -> dict[int, list[str]]:
-        """Item id -> the 36 cells of its testcase-form row (items read from other inputs are absent)."""
-        with self._conn() as c:
-            rows = c.execute(
-                "SELECT id, form_json FROM items WHERE audio_set_id=? AND form_json IS NOT NULL", (audio_set_id,)
-            ).fetchall()
-        return {r["id"]: json.loads(r["form_json"]) for r in rows}
 
     def _select_items(self, audio_set_id: int, item_ids: list[int] | None, where: str,
                       args: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
@@ -371,10 +419,11 @@ class Store:
                 (audio_set_id, serial, device_model, profile_name, app_version, _now()),
             )
             run_id = int(cur.lastrowid)
+            # every row with audio goes to the app, whatever its verify result (shown beside it)
             sql = ("INSERT INTO app_results(app_run_id, item_id, status, updated_at, text_tts_snap, audio_snap)"
                    " SELECT ?, id, ?, ?, text_tts, audio_path FROM items"
-                   " WHERE audio_set_id=? AND status=? AND enabled=1 AND audio_path IS NOT NULL")
-            params: list[Any] = [run_id, AppStatus.PENDING.value, _now(), audio_set_id, ItemStatus.PASSED.value]
+                   f" WHERE audio_set_id=? AND {_HAS_AUDIO}")
+            params: list[Any] = [run_id, AppStatus.PENDING.value, _now(), audio_set_id, ItemStatus.SKIPPED.value]
             if item_ids is not None:
                 sql += f" AND id IN ({','.join('?' * len(item_ids)) or 'NULL'})"
                 params += list(item_ids)

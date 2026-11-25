@@ -109,12 +109,6 @@ def test_create_set_rejects_region_conflict_and_missing_sheets(client, tmp_path)
     assert r.status_code == 422
 
 
-def test_create_set_keeps_form_cells(client, tmp_path):
-    set_id = create_set(client, tmp_path)
-    cells = client.app.state.ctx.store.form_cells(set_id)
-    assert len(cells) == 3 and all(len(v) == 36 for v in cells.values())
-
-
 def test_voice_preview_caches_a_wav_for_the_selected_preset(client, monkeypatch):
     ctx = client.app.state.ctx
     tts = ctx.tts
@@ -389,6 +383,85 @@ def test_clear_all_data_while_job_runs_is_409(tmp_path):
         wait_job_end(c)
 
 
+def test_reset_progress_keeps_rows_and_removes_wavs(client, tmp_path):
+    set_id = create_set(client, tmp_path)
+    before = statuses(client, set_id)
+    assert client.post(f"/api/audio-sets/{set_id}/generate").status_code == 200
+    wait_job_end(client)
+    wavs = {i["audio_path"] for i in client.get(f"/api/audio-sets/{set_id}/items").json() if i["audio_path"]}
+    assert wavs
+
+    res = client.delete("/api/progress")
+
+    assert res.status_code == 200
+    assert statuses(client, set_id) == before
+    assert all(i["audio_path"] is None for i in client.get(f"/api/audio-sets/{set_id}/items").json())
+    assert not any(Path(p).exists() for p in wavs)
+    assert [s["id"] for s in client.get("/api/audio-sets").json()] == [set_id]
+
+
+def test_settings_voice_speed(client):
+    s = client.get("/api/settings").json()
+    assert s["voice_speed"] == 1.0
+    assert client.put("/api/settings", json=s | {"voice_speed": 1.2}).status_code == 200
+    assert client.get("/api/settings").json()["voice_speed"] == 1.2
+    for bad in (0.5, 1.5):
+        assert client.put("/api/settings", json=s | {"voice_speed": bad}).status_code == 422
+
+
+def test_voice_preview_speed(client, monkeypatch):
+    tts = client.app.state.ctx.tts
+    monkeypatch.setattr(tts, "voices", lambda: [VoiceInfo("Quang Sơn", "Quang Sơn — Nam · Trung")])
+    normal = client.get("/api/voices/preview", params={"voice_id": "Quang Sơn"})
+    fast = client.get("/api/voices/preview", params={"voice_id": "Quang Sơn", "speed": 1.2})
+    assert normal.status_code == fast.status_code == 200
+    assert len(fast.content) < len(normal.content)
+    assert client.get("/api/voices/preview", params={"voice_id": "Quang Sơn", "speed": 3}).status_code == 422
+
+
+def test_create_set_copies_source(client, tmp_path):
+    set_id = create_set(client, tmp_path)
+    ctx = client.app.state.ctx
+    copy = ctx.sources / str(set_id) / "mini.xlsx"
+    assert copy.is_file()
+    assert copy.read_bytes() == (tmp_path / "mini.xlsx").read_bytes()
+    s = ctx.store.get_audio_set(set_id)
+    assert Path(s["source_path"]) == copy and s["header_row"] == 4
+
+
+def test_create_set_csv_keeps_no_source(client, tmp_path):
+    p = tmp_path / "a.csv"
+    p.write_text("cau\nBật đèn\n", encoding="utf-8")
+    with p.open("rb") as f:
+        info = client.post("/api/files/inspect", files={"file": ("a.csv", f)}).json()
+    r = client.post("/api/audio-sets", json={"file_id": info["file_id"], "sheets": [], "name": "c",
+                                             "mapping": {"text_col": "cau"}})
+    assert r.status_code == 200, r.text
+    set_id = r.json()["id"]
+    ctx = client.app.state.ctx
+    s = ctx.store.get_audio_set(set_id)
+    assert s["source_path"] is None and s["header_row"] == 1
+    assert not (ctx.sources / str(set_id)).exists()
+
+
+def test_delete_set_and_clear_all_remove_sources(client, tmp_path):
+    ctx = client.app.state.ctx
+    first, second = create_set(client, tmp_path), create_set(client, tmp_path)
+    assert client.delete(f"/api/audio-sets/{first}").status_code == 200
+    assert not (ctx.sources / str(first)).exists()
+    assert (ctx.sources / str(second)).is_dir()
+    assert client.delete("/api/data").status_code == 200
+    assert not any(ctx.sources.iterdir())
+
+
+def test_put_settings_ignores_tts_device(client):
+    s = client.get("/api/settings").json()
+    assert s["tts_device"] == "cpu"
+    r = client.put("/api/settings", json={**s, "tts_device": "cuda"})
+    assert r.status_code == 200, r.text
+    assert r.json()["tts_device"] == "cpu"
+
+
 def export_set_zip(client, set_id):
     r = client.post(f"/api/audio-sets/{set_id}/export")
     assert r.status_code == 200, r.text
@@ -420,12 +493,15 @@ def test_export_then_import_restores_a_verified_set(client, tmp_path):
     assert audio.status_code == 200 and audio.content
 
 
-def test_import_keeps_form_cells(client, tmp_path):
+def test_import_keeps_rows_for_result_export(client, tmp_path):
+    """The result export places each row by sheet + source row: those must come back unchanged."""
     set_id = create_set(client, tmp_path)
     data = export_set_zip(client, set_id)
     new_id = import_set_zip(client, data).json()["id"]
-    cells = client.app.state.ctx.store.form_cells(new_id)
-    assert len(cells) == 3 and all(len(v) == 36 for v in cells.values())
+    cols = ("sheet", "tc_id", "turn", "source_row", "text_raw", "text_tts", "expected", "region", "enabled")
+    old = [{k: i[k] for k in cols} for i in client.get(f"/api/audio-sets/{set_id}/items").json()]
+    new = [{k: i[k] for k in cols} for i in client.get(f"/api/audio-sets/{new_id}/items").json()]
+    assert new == old and len(new) == 3
 
 
 def test_import_rejects_non_zip_with_422(client):

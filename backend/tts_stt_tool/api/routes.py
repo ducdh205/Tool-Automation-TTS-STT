@@ -11,7 +11,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException, Request, UploadFile
+from fastapi import APIRouter, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.background import BackgroundTask
@@ -29,14 +29,16 @@ from tts_stt_tool.pipeline.block1 import run_generate, run_verify
 from tts_stt_tool.pipeline.block2 import run_block2
 from tts_stt_tool.report.audio_set_zip import PackError, build_audio_set_zip, import_audio_set_zip, pack_name
 from tts_stt_tool.report.excel import build_block1_report, export_block1_csv
-from tts_stt_tool.report.form_export import build_form_report
+from tts_stt_tool.report.result_export import build_result_report, result_suffix
 from tts_stt_tool.report.session_zip import build_session_zip, session_root_name
 from tts_stt_tool.store.db import ItemStatus
 from tts_stt_tool.stt.wyoming_client import WyomingStt
 from tts_stt_tool.tts.base import VoiceInfo
+from tts_stt_tool.tts.speed import MAX_SPEED, MIN_SPEED
 
 router = APIRouter()
 XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+XLSM_TYPE = "application/vnd.ms-excel.sheet.macroEnabled.12"
 VOICE_PREVIEW_TEXT = "Xin chào, bạn muốn bật quạt hay điều chỉnh nhiệt độ?"
 
 
@@ -139,6 +141,17 @@ async def create_audio_set(request: Request, body: AudioSetIn) -> dict[str, int]
         body.name or source, source, body.sheets, ctx.settings.voice, items,
         voice_trung=ctx.settings.voice_trung, voice_nam=ctx.settings.voice_nam,
     )
+    kept: str | None = None
+    if path.suffix.lower() != ".csv":
+        dest = ctx.sources / str(set_id) / _safe_name(source)
+
+        def keep() -> None:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(path, dest)
+
+        await asyncio.to_thread(keep)
+        kept = str(dest)
+    ctx.store.set_source(set_id, kept, m.header_row)
     return {"id": set_id}
 
 
@@ -203,6 +216,7 @@ async def delete_audio_set(request: Request, set_id: int) -> dict[str, bool]:
         raise HTTPException(404, "Không tìm thấy bộ audio")
 
     def cleanup() -> None:
+        shutil.rmtree(ctx.sources / str(set_id), ignore_errors=True)
         for run_id in gone["run_ids"]:
             shutil.rmtree(ctx.run_dir(run_id), ignore_errors=True)
         cache_root = ctx.cache.root.resolve()
@@ -239,11 +253,30 @@ async def clear_all_data(request: Request) -> dict[str, Any]:
     ctx.exports.clear()
 
     def cleanup() -> None:
-        for d in (ctx.cache.root, ctx.reports, ctx.uploads, ctx.settings.data_dir / "app_runs"):
+        for d in (ctx.cache.root, ctx.reports, ctx.uploads, ctx.sources, ctx.settings.data_dir / "app_runs"):
             _empty_dir(d)
 
     await asyncio.to_thread(cleanup)
     return {"ok": True, "sets": count}
+
+
+@router.delete("/progress")
+async def reset_progress(request: Request) -> dict[str, Any]:
+    """Clear generated audio, STT/WER results and app runs of every set; imported rows are kept as "Chờ"."""
+    ctx = ctx_of(request)
+    job = ctx.runner.current()
+    if job is not None:  # a running job may be writing rows or files
+        raise HTTPException(409, f"Đang chạy: {job['name']} — dừng job trước khi xóa")
+    count = ctx.store.reset_progress()
+    ctx.exports.clear()
+
+    def cleanup() -> None:
+        # No row points at a WAV any more, so the whole audio cache is stale.
+        for d in (ctx.cache.root, ctx.reports, ctx.settings.data_dir / "app_runs"):
+            _empty_dir(d)
+
+    await asyncio.to_thread(cleanup)
+    return {"ok": True, "items": count}
 
 
 @router.get("/audio-sets/{set_id}/items")
@@ -398,6 +431,7 @@ class SettingsIn(BaseModel):
     voice: str | None = None
     voice_trung: str | None = None
     voice_nam: str | None = None
+    voice_speed: float = Field(default=1.0, ge=MIN_SPEED, le=MAX_SPEED)
     max_regen: int = Field(ge=0, le=10)
     wer_threshold: float = Field(ge=0, le=1)
     reject_warn_ratio: float = Field(ge=0, le=1)
@@ -406,12 +440,15 @@ class SettingsIn(BaseModel):
     stt_timeout_s: float = Field(gt=0, le=600)
     wyoming_cmd: list[str] = []
     port: int = Field(ge=1, le=65535)
+    # Echoed back by the settings form; ignored here — CPU/GPU changes go through PUT /api/tts/device,
+    # which checks CUDA first.
+    tts_device: str | None = None
 
 
 @router.put("/settings")
 def put_settings(request: Request, body: SettingsIn) -> dict[str, Any]:
     ctx = ctx_of(request)
-    for k, v in body.model_dump().items():
+    for k, v in body.model_dump(exclude={"tts_device"}).items():
         setattr(ctx.settings, k, v)
     save_settings(ctx.settings)
     if isinstance(ctx.stt, WyomingStt):  # apply without restart
@@ -435,22 +472,77 @@ async def voices(request: Request) -> list[dict[str, str]]:
 
 
 @router.get("/voices/preview")
-async def voice_preview(request: Request, voice_id: str) -> FileResponse:
+async def voice_preview(request: Request, voice_id: str,
+                        speed: float = Query(default=1.0, ge=MIN_SPEED, le=MAX_SPEED)) -> FileResponse:
     ctx = ctx_of(request)
     if not any(voice.id == voice_id for voice in await _available_voices(ctx)):
         raise HTTPException(404, "Giọng VieNeu này không có sẵn")
     async with ctx.voice_lock:
-        path = await ctx.voice_preview_cache.get_or_synthesize(ctx.tts, VOICE_PREVIEW_TEXT, voice_id, attempt=0)
+        path = await ctx.voice_preview_cache.get_or_synthesize(ctx.tts, VOICE_PREVIEW_TEXT, voice_id, attempt=0,
+                                                               speed=speed)
     return FileResponse(path, media_type="audio/wav")
 
 
-def _gpu_available() -> bool:
-    try:
-        import torch  # optional
+# -- TTS device (CPU / GPU) ----------------------------------------------------
+async def _tts_device_json(ctx: AppContext, refresh: bool = False) -> dict[str, Any]:
+    probe = await ctx.gpu.probe(refresh=refresh)
+    return {
+        "device": ctx.settings.tts_device,
+        "active": getattr(ctx.tts, "active_device", None),
+        "load_error": getattr(ctx.tts, "load_error", None),
+        "nvidia": probe.nvidia,
+        "gpu_name": probe.gpu_name,
+        "torch_cuda": probe.torch_cuda,
+        "uv": ctx.gpu.can_install,
+        "install": ctx.gpu.install_state(),
+    }
 
-        return bool(torch.cuda.is_available())
-    except Exception:
-        return False
+
+def _apply_tts_device(ctx: AppContext, device: str) -> None:
+    ctx.settings.tts_device = device
+    save_settings(ctx.settings)
+    set_device = getattr(ctx.tts, "set_device", None)
+    if set_device is not None:
+        set_device(device)
+
+
+@router.get("/tts/device")
+async def get_tts_device(request: Request) -> dict[str, Any]:
+    return await _tts_device_json(ctx_of(request))
+
+
+class TtsDeviceIn(BaseModel):
+    device: Literal["cpu", "cuda"]
+
+
+@router.put("/tts/device")
+async def put_tts_device(request: Request, body: TtsDeviceIn) -> dict[str, Any]:
+    ctx = ctx_of(request)
+    if ctx.runner.current() is not None:  # the model is reloaded on switch; never under a running job
+        raise HTTPException(409, "Đang có tác vụ chạy, đợi xong rồi đổi")
+    if body.device == "cuda":
+        probe = await ctx.gpu.probe(refresh=True)  # CUDA may have been installed by hand meanwhile
+        if not probe.nvidia:
+            raise HTTPException(409, "Máy không có GPU NVIDIA")
+        if not probe.torch_cuda:
+            raise HTTPException(409, "Chưa có PyTorch CUDA")
+    if body.device != ctx.settings.tts_device:
+        _apply_tts_device(ctx, body.device)
+    return await _tts_device_json(ctx)
+
+
+@router.post("/tts/install-cuda")
+async def install_cuda(request: Request) -> dict[str, Any]:
+    ctx = ctx_of(request)
+    if not (await ctx.gpu.probe()).nvidia:
+        raise HTTPException(400, "Máy không có GPU NVIDIA")
+
+    def on_done() -> None:
+        if ctx.runner.current() is None:  # else the user switches once the job ends
+            _apply_tts_device(ctx, "cuda")
+
+    ctx.gpu.start_install(on_done)
+    return await _tts_device_json(ctx)
 
 
 # -- device -------------------------------------------------------------------
@@ -543,6 +635,7 @@ class ProfileIn(BaseModel):
     post_delay_s: float = Field(ge=0, le=10)
     listen_timeout_s: float = Field(gt=0, le=60)
     result_timeout_s: float = Field(gt=0, le=120)
+    between_delay_s: float = Field(default=0.0, ge=0, le=60)
 
 
 @router.get("/profiles")
@@ -593,8 +686,8 @@ async def create_app_run(request: Request, set_id: int, body: AppRunIn) -> dict[
     profile = _profile(ctx, body.profile)
     if ctx.runner.current() is not None:
         raise HTTPException(409, f"Đang chạy: {ctx.runner.current()['name']}")
-    if not ctx.store.summary(set_id).get(ItemStatus.PASSED.value):
-        raise HTTPException(422, "Bộ audio chưa có câu Đạt — chạy Khối 1 trước")
+    if not ctx.store.count_with_audio(set_id):
+        raise HTTPException(422, "Bộ audio chưa có câu nào có audio — sinh audio ở Khối 1 trước")
     model = version = None
     if ctx.device_factory is None and ctx.adb.available:
         try:
@@ -605,7 +698,7 @@ async def create_app_run(request: Request, set_id: int, body: AppRunIn) -> dict[
     run_id = ctx.store.create_app_run(set_id, body.serial, model, profile.name, version, item_ids=body.item_ids)
     if not ctx.store.app_results(run_id):
         ctx.store.delete_app_run(run_id)
-        raise HTTPException(422, "Không có câu Đạt nào trong các case đã chọn")
+        raise HTTPException(422, "Không có câu nào có audio trong các case đã chọn")
     return {"id": run_id, "job_id": _start_block2(ctx, run_id, body.serial, profile)}
 
 
@@ -632,9 +725,10 @@ def _run_file_base(ctx: AppContext, run: dict[str, Any]) -> str:
 async def form_report(request: Request, run_id: int) -> FileResponse:
     ctx = ctx_of(request)
     run = _require_run(ctx, run_id)
-    out = ctx.reports / f"KetQua_{_run_file_base(ctx, run)}.xlsx"
-    await asyncio.to_thread(build_form_report, ctx.store, run_id, out)
-    return FileResponse(out, media_type=XLSX_TYPE, filename=out.name)
+    suffix = result_suffix(ctx.store.get_audio_set(run["audio_set_id"]) or {})
+    out = ctx.reports / f"KetQua_{_run_file_base(ctx, run)}{suffix}"
+    await asyncio.to_thread(build_result_report, ctx.store, run_id, out)
+    return FileResponse(out, media_type=XLSM_TYPE if suffix == ".xlsm" else XLSX_TYPE, filename=out.name)
 
 
 class ExportZipIn(BaseModel):
@@ -717,5 +811,5 @@ async def health(request: Request) -> dict[str, Any]:
         from tts_stt_tool.stt.server_manager import port_open
 
         up = await port_open(ctx.settings.wyoming_host, ctx.settings.wyoming_port, 0.5)
-    return {"wyoming": up, "wyoming_error": ctx.wyoming_error, "gpu": _gpu_available(),
+    return {"wyoming": up, "wyoming_error": ctx.wyoming_error, "gpu": (await ctx.gpu.probe()).torch_cuda,
             "job": ctx.runner.current()}

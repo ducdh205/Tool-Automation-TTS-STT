@@ -1,8 +1,10 @@
-"""An app run with one result of each kind, shared by the form-export and session-zip tests."""
+"""An app run with one result of each kind, shared by the result-export and session-zip tests."""
 
 from types import SimpleNamespace
 
+import openpyxl
 import pytest
+from openpyxl.styles import Font, PatternFill
 
 from tts_stt_tool.compare.score import compare
 from tts_stt_tool.config import Settings
@@ -10,30 +12,48 @@ from tts_stt_tool.models import InputItem
 from tts_stt_tool.store.db import AppStatus, ItemStatus, Store
 
 SHEET = "Ionizer via voice command"
+DROPPED = "Sheet bỏ"
+HEADER_FILL = "FFFFF2CC"
 
 
-def form_row(tc, turn, text, note=""):
-    cells = [""] * 36
-    cells[0], cells[1], cells[2], cells[4], cells[7] = tc, "Bật ionizer", "UC_01", "P0 - Smoke", "BAC-HN"
-    cells[8], cells[11], cells[12], cells[13], cells[27] = turn, "👤 Người dùng", text, "Ionizer bật", note
-    return cells
+def write_source(path, sheets=(SHEET, DROPPED)):
+    """A tester's file: title merged over A1:C1, styled header on row 4, data rows 5-8 (row 8 never tested)."""
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+    for name in sheets:
+        ws = wb.create_sheet(name)
+        ws["A1"] = "Kịch bản ionizer"
+        ws.merge_cells("A1:C1")
+        for col, h in zip("ABC", ("TC_ID", "Lượt", "Câu nói")):
+            ws[f"{col}4"] = h
+            ws[f"{col}4"].font = Font(bold=True)
+            ws[f"{col}4"].fill = PatternFill("solid", fgColor=HEADER_FILL)
+        for row, (tc, text) in enumerate((("TC1", "Bật ionizer"), ("TC2", "Hey Vita, mở cửa sổ"),
+                                          ("TC3", "Tắt đèn"), ("TC4", "Câu không test")), start=5):
+            ws[f"A{row}"], ws[f"B{row}"], ws[f"C{row}"] = tc, 1, text
+        ws.column_dimensions["C"].width = 33
+        ws.auto_filter.ref = "A4:C8"
+    wb.save(path)
+    return path
 
 
-def input_item(tc, turn, text, row, note="", form=True):
+def input_item(tc, turn, text, row):
     return InputItem(sheet=SHEET, tc_id=tc, turn=turn, feature="Bật ionizer", priority="P0 - Smoke",
                      region="BAC-HN", speaker="👤 Người dùng", text_raw=text, expected="Ionizer bật",
-                     source_row=row, form=form_row(tc, turn, text, note) if form else [])
+                     source_row=row)
 
 
-def make_session(tmp_path, *, form=True):
+def make_session(tmp_path, *, source=True):
     store = Store(tmp_path / "t.db")
     settings = Settings(data_dir=tmp_path)
     items = [
-        input_item("TC1", "1", "Bật ionizer", 5, form=form),
-        input_item("TC2", "1", "Hey Vita, mở cửa sổ", 6, note="ghi chú gốc", form=form),
-        input_item("TC3", "1", "Tắt đèn", 7, form=form),
+        input_item("TC1", "1", "Bật ionizer", 5),
+        input_item("TC2", "1", "Hey Vita, mở cửa sổ", 6),
+        input_item("TC3", "1", "Tắt đèn", 7),
     ]
     set_id = store.create_audio_set("Bộ điều khiển", "DieuKhienXe_Pre.xlsx", [SHEET], "Ngọc Huyền", items)
+    if source:
+        store.set_source(set_id, str(write_source(tmp_path / "src.xlsx")), 4)
     audio = tmp_path / "audio"
     audio.mkdir()
     for it in store.get_items(set_id):
