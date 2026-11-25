@@ -226,3 +226,29 @@ def test_reset_progress_keeps_rows_and_clears_results(store, set_id):
     assert [i["status"] for i in after] == [i["status"] for i in before]  # "Không áp dụng" stays
     assert all(i["audio_path"] is None and i["error"] is None and i["attempts"] == 0 for i in after)
     assert store.get_app_run(run_id) is None
+
+
+def test_set_source_roundtrip(store, set_id):
+    s = store.get_audio_set(set_id)
+    assert s["source_path"] is None and s["header_row"] is None
+    store.set_source(set_id, "x/a.xlsx", 3)
+    s = store.get_audio_set(set_id)
+    assert s["source_path"] == "x/a.xlsx" and s["header_row"] == 3
+
+
+def test_old_db_gets_source_columns(tmp_path):
+    import sqlite3
+
+    path = tmp_path / "old.db"
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        "CREATE TABLE audio_sets (id INTEGER PRIMARY KEY, name TEXT NOT NULL, source_file TEXT NOT NULL,"
+        " sheets_json TEXT NOT NULL, voice TEXT, created_at TEXT NOT NULL);"
+        "INSERT INTO audio_sets(name, source_file, sheets_json, created_at) VALUES ('a', 'a.xlsx', '[]', 'x');"
+    )
+    conn.close()
+    store = Store(path)
+    s = store.get_audio_set(1)
+    assert s["source_path"] is None and s["header_row"] is None
+    store.set_source(1, "a.xlsx", 2)
+    assert store.get_audio_set(1)["header_row"] == 2

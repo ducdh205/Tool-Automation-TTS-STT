@@ -62,6 +62,11 @@ class AppContext:
         return self.settings.data_dir / "uploads"
 
     @property
+    def sources(self) -> Path:
+        """A copy of each audio set's input file: ``sources/<set_id>/<file name>``."""
+        return self.settings.data_dir / "sources"
+
+    @property
     def reports(self) -> Path:
         return self.settings.data_dir / "reports"
 

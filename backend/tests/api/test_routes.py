@@ -417,3 +417,38 @@ def test_voice_preview_speed(client, monkeypatch):
     assert normal.status_code == fast.status_code == 200
     assert len(fast.content) < len(normal.content)
     assert client.get("/api/voices/preview", params={"voice_id": "Quang Sơn", "speed": 3}).status_code == 422
+
+
+def test_create_set_copies_source(client, tmp_path):
+    set_id = create_set(client, tmp_path)
+    ctx = client.app.state.ctx
+    copy = ctx.sources / str(set_id) / "mini.xlsx"
+    assert copy.is_file()
+    assert copy.read_bytes() == (tmp_path / "mini.xlsx").read_bytes()
+    s = ctx.store.get_audio_set(set_id)
+    assert Path(s["source_path"]) == copy and s["header_row"] == 4
+
+
+def test_create_set_csv_keeps_no_source(client, tmp_path):
+    p = tmp_path / "a.csv"
+    p.write_text("cau\nBật đèn\n", encoding="utf-8")
+    with p.open("rb") as f:
+        info = client.post("/api/files/inspect", files={"file": ("a.csv", f)}).json()
+    r = client.post("/api/audio-sets", json={"file_id": info["file_id"], "sheets": [], "name": "c",
+                                             "mapping": {"text_col": "cau"}})
+    assert r.status_code == 200, r.text
+    set_id = r.json()["id"]
+    ctx = client.app.state.ctx
+    s = ctx.store.get_audio_set(set_id)
+    assert s["source_path"] is None and s["header_row"] == 1
+    assert not (ctx.sources / str(set_id)).exists()
+
+
+def test_delete_set_and_clear_all_remove_sources(client, tmp_path):
+    ctx = client.app.state.ctx
+    first, second = create_set(client, tmp_path), create_set(client, tmp_path)
+    assert client.delete(f"/api/audio-sets/{first}").status_code == 200
+    assert not (ctx.sources / str(first)).exists()
+    assert (ctx.sources / str(second)).is_dir()
+    assert client.delete("/api/data").status_code == 200
+    assert not any(ctx.sources.iterdir())

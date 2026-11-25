@@ -139,6 +139,17 @@ async def create_audio_set(request: Request, body: AudioSetIn) -> dict[str, int]
         body.name or source, source, body.sheets, ctx.settings.voice, items,
         voice_trung=ctx.settings.voice_trung, voice_nam=ctx.settings.voice_nam,
     )
+    kept: str | None = None
+    if path.suffix.lower() != ".csv":
+        dest = ctx.sources / str(set_id) / _safe_name(source)
+
+        def keep() -> None:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(path, dest)
+
+        await asyncio.to_thread(keep)
+        kept = str(dest)
+    ctx.store.set_source(set_id, kept, m.header_row)
     return {"id": set_id}
 
 
@@ -161,6 +172,7 @@ async def delete_audio_set(request: Request, set_id: int) -> dict[str, bool]:
         raise HTTPException(404, "Không tìm thấy bộ audio")
 
     def cleanup() -> None:
+        shutil.rmtree(ctx.sources / str(set_id), ignore_errors=True)
         for run_id in gone["run_ids"]:
             shutil.rmtree(ctx.run_dir(run_id), ignore_errors=True)
         cache_root = ctx.cache.root.resolve()
@@ -197,7 +209,7 @@ async def clear_all_data(request: Request) -> dict[str, Any]:
     ctx.exports.clear()
 
     def cleanup() -> None:
-        for d in (ctx.cache.root, ctx.reports, ctx.uploads, ctx.settings.data_dir / "app_runs"):
+        for d in (ctx.cache.root, ctx.reports, ctx.uploads, ctx.sources, ctx.settings.data_dir / "app_runs"):
             _empty_dir(d)
 
     await asyncio.to_thread(cleanup)
