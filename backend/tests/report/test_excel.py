@@ -58,7 +58,7 @@ def test_report_sheets_and_overview(populated, tmp_path):
     reject = find_value(ov, "Tỉ lệ audio bị loại")
     assert reject.value == pytest.approx(2 / 9)
     assert reject.fill.fgColor.rgb.endswith("FFC7CE")
-    assert find_value(ov, "Giọng").value == "Ngọc Huyền"
+    assert find_value(ov, "Giọng").value == "Bắc: Ngọc Huyền · Trung: Ngọc Huyền · Nam: Ngọc Huyền"
     assert find_value(ov, "Đạt").value == 7
 
 

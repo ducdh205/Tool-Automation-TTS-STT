@@ -213,3 +213,14 @@ def test_delete_audio_set_keeps_wav_shared_with_another_set(store, set_id):
 
 def test_delete_unknown_audio_set_returns_none(store):
     assert store.delete_audio_set(999) is None
+
+
+def test_delete_all_audio_sets_cascades(store, set_id):
+    run_id = store.create_app_run(set_id, "SER", None, "p", None)
+    store.create_audio_set("bộ 2", "file.xlsx", ["S1"], None, [_item("TC-9", "Hey Vita, bật đèn")])
+
+    assert store.delete_all_audio_sets() == 2
+    assert store.list_audio_sets() == []
+    assert store.get_items(set_id) == []
+    assert store.get_app_run(run_id) is None
+    assert store.delete_all_audio_sets() == 0

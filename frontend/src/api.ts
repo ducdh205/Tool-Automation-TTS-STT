@@ -14,15 +14,21 @@ export interface Item {
 
 export interface AudioSet {
   id: number; name: string; source_file: string; sheets: string[]; voice: string | null;
-  created_at: string; summary: Record<string, number>;
+  voice_trung?: string | null; voice_nam?: string | null; created_at: string; summary: Record<string, number>;
 }
 
-export interface SheetInfo { name: string; item_count: number; is_testcase: boolean }
-export interface InspectResult { file_id: string; is_form: boolean; columns: string[]; sheets: SheetInfo[] }
-export interface ColumnMapping { text_col: string; id_col: string | null; header_row?: number }
+export type MappingField = "text_col" | "id_col" | "region_col" | "expected_col" | "turn_col";
+export interface InspectResult { file_id: string; sheets: string[] }
+export interface SheetPreview {
+  columns: string[]; rows: string[][]; row_count: number; suggestions: Partial<Record<MappingField, string>>;
+}
+export interface ColumnMapping {
+  text_col: string; header_row: number; id_col?: string | null; region_col?: string | null;
+  region_value?: string | null; expected_col?: string | null; turn_col?: string | null;
+}
 
 export interface Settings {
-  voice: string | null; max_regen: number; wer_threshold: number; reject_warn_ratio: number;
+  voice: string | null; voice_trung: string | null; voice_nam: string | null; max_regen: number; wer_threshold: number; reject_warn_ratio: number;
   wyoming_host: string; wyoming_port: number; stt_timeout_s: number; wyoming_cmd: string[]; port: number;
 }
 export interface Health { wyoming: boolean; wyoming_error: string | null; gpu: boolean; job: Job | null }
@@ -90,11 +96,15 @@ export const api = {
     fd.append("file", file);
     return req<InspectResult>("POST", "/api/files/inspect", fd);
   },
-  createSet: (b: { file_id: string; sheets: string[]; name: string; mapping?: ColumnMapping }) =>
+  preview: (b: { file_id: string; sheet: string | null; header_row: number }) =>
+    req<SheetPreview>("POST", "/api/files/preview", b),
+  createSet: (b: { file_id: string; sheets: string[]; name: string; mapping: ColumnMapping }) =>
     req<{ id: number }>("POST", "/api/audio-sets", b),
   sets: () => req<AudioSet[]>("GET", "/api/audio-sets"),
   /** Also removes its app runs, screenshots and WAVs no other set uses; 409 while a job runs. */
   deleteSet: (setId: number) => req<{ ok: boolean }>("DELETE", `/api/audio-sets/${setId}`),
+  /** Every set + its WAVs, app runs, screenshots, reports and uploads; keeps settings and profiles. 409 while a job runs. */
+  clearAllData: () => req<{ ok: boolean; sets: number }>("DELETE", "/api/data"),
   items: (setId: number) => req<Item[]>("GET", `/api/audio-sets/${setId}/items`),
   patchItem: (id: number, patch: { text_tts?: string; enabled?: boolean }) =>
     req<Item>("PATCH", `/api/items/${id}`, patch),

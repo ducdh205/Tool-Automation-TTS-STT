@@ -15,6 +15,8 @@ interface Props {
   onSelectSet: (id: number) => void;
   /** Called once the user confirmed deleting a set; omit to hide the delete buttons. */
   onDeleteSet?: (id: number) => void;
+  /** Called once the user confirmed wiping all output data; omit to hide the button. */
+  onClearAll?: () => void;
   /** Why deleting is not possible now (a job is running): the buttons are disabled with this tooltip. */
   deleteLocked?: string | null;
   /** Latest /api/device poll (null until the first answer). */
@@ -56,7 +58,8 @@ export function adbStatus(s: DeviceStatus | null): { level: Level; label: string
 }
 
 export function Sidebar({
-  section, onSection, step2Ready, health, sets, currentSetId, onSelectSet, onDeleteSet, deleteLocked = null, device = null,
+  section, onSection, step2Ready, health, sets, currentSetId, onSelectSet, onDeleteSet, onClearAll, deleteLocked = null,
+  device = null,
 }: Props) {
   const adb = adbStatus(device);
   const stt = { level: (health?.wyoming ? "ok" : "bad") as Level, label: "STT", title: health?.wyoming
@@ -84,7 +87,27 @@ export function Sidebar({
       </nav>
 
       <div className="side-block">
-        <div className="side-title">Bộ audio</div>
+        <div className="side-title-row">
+          <div className="side-title">Bộ audio</div>
+          {onClearAll && (
+            <button
+              className="icon-btn clear-all"
+              aria-label="Xóa toàn bộ dữ liệu"
+              title={deleteLocked ?? "Xóa toàn bộ dữ liệu output"}
+              disabled={!!deleteLocked}
+              onClick={() => {
+                if (window.confirm(`Xóa toàn bộ dữ liệu output (${sets.length} bộ audio)?\n\n`
+                  + "Audio đã sinh, các lần test app, ảnh chụp màn hình, báo cáo và file đã nạp sẽ bị xóa, "
+                  + "không hoàn tác được.\nCài đặt và hồ sơ app được giữ lại.")) {
+                  onClearAll();
+                }
+              }}
+            >
+              <Icon name="trash" size={13} />
+              <span>Xóa tất cả</span>
+            </button>
+          )}
+        </div>
         {sets.length === 0 && <div className="muted small side-note">Chưa có — nạp file để tạo</div>}
         <div className="set-list">
           {sets.map((s) => {

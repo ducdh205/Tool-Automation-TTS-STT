@@ -1,23 +1,29 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type Voice } from "../api";
 
-const REGIONAL_PRESETS = [
-  { region: "Bắc", preferred: ["Ngọc Huyền", "Hải Đăng", "Mai Anh"] },
-  { region: "Trung", preferred: ["Quang Sơn", "Ngọc Trân"] },
-  { region: "Nam", preferred: ["Adam", "Thùy Dung", "Minh Triết"] },
+export type VoiceField = "voice" | "voice_trung" | "voice_nam";
+
+/** One voice per region; rows whose region column is blank or unknown use the Bắc voice. */
+export const VOICE_REGIONS: { field: VoiceField; region: string; preferred: string[] }[] = [
+  { field: "voice", region: "Bắc", preferred: ["Ngọc Huyền", "Hải Đăng", "Mai Anh"] },
+  { field: "voice_trung", region: "Trung", preferred: ["Quang Sơn", "Ngọc Trân"] },
+  { field: "voice_nam", region: "Nam", preferred: ["Thùy Dung", "Adam", "Minh Triết"] },
 ];
 
 interface Props {
-  voice: string;
-  savedVoice: string;
+  values: Record<VoiceField, string>;
+  saved: Record<VoiceField, string>;
   disabled: boolean;
-  onChange: (voice: string) => void;
+  onChange: (field: VoiceField, voice: string) => void;
 }
 
-export function VoicePicker({ voice, savedVoice, disabled, onChange }: Props) {
+const regionOf = (v: Voice) => v.label.split("·")[1]?.trim();
+
+export function VoicePicker({ values, saved, disabled, onChange }: Props) {
   const [voices, setVoices] = useState<Voice[]>([]);
   const [voiceStatus, setVoiceStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [previewStatus, setPreviewStatus] = useState<"idle" | "loading" | "playing" | "error">("idle");
+  const [previewField, setPreviewField] = useState<VoiceField | null>(null);
   const preview = useRef<HTMLAudioElement | null>(null);
 
   const stopAudio = useCallback(() => {
@@ -45,13 +51,13 @@ export function VoicePicker({ voice, savedVoice, disabled, onChange }: Props) {
     }).catch(() => setVoiceStatus("error"));
   };
 
-  const playPreview = async () => {
-    if (preview.current) {
-      stopPreview();
-      return;
-    }
-    const audio = new Audio(api.voicePreviewUrl(voice));
+  const playPreview = async (field: VoiceField) => {
+    const wasPlaying = preview.current !== null && previewField === field;
+    stopPreview();
+    if (wasPlaying) return;
+    const audio = new Audio(api.voicePreviewUrl(values[field]));
     preview.current = audio;
+    setPreviewField(field);
     setPreviewStatus("loading");
     const finish = (status: "idle" | "error") => {
       if (preview.current === audio) stopPreview(status);
@@ -66,43 +72,58 @@ export function VoicePicker({ voice, savedVoice, disabled, onChange }: Props) {
     }
   };
 
-  const groups = REGIONAL_PRESETS.map(({ region, preferred }) => {
-    const available = voices.filter(({ label }) => label.split("·")[1]?.trim() === region);
-    const byId = new Map(available.map((option) => [option.id, option]));
-    const options = [...new Set([...preferred, ...byId.keys()])].flatMap((id) => byId.get(id) ?? []).slice(0, 3);
-    return { region, options };
-  });
-  const showSaved = !groups.some(({ options }) => options.some(({ id }) => id === savedVoice));
-  const savedLabel = voices.find(({ id }) => id === savedVoice)?.label ?? (savedVoice || "Mặc định");
-  const previewActive = previewStatus === "loading" || previewStatus === "playing";
+  const optionsFor = (region: string, preferred: string[]) => {
+    const own = voices.filter((v) => regionOf(v) === region);
+    const rank = (v: Voice) => (preferred.includes(v.id) ? preferred.indexOf(v.id) : preferred.length);
+    return { own: [...own].sort((a, b) => rank(a) - rank(b)), other: voices.filter((v) => regionOf(v) !== region) };
+  };
 
   return (
-    <div className="field run-voice">
-      <label htmlFor="run-voice">Giọng VieNeu</label>
-      <div className="voice-picker">
-        <select id="run-voice" value={voice} disabled={disabled}
-          onFocus={loadVoices} onPointerDown={loadVoices}
-          onChange={(event) => {
-            stopPreview();
-            onChange(event.target.value);
-          }} aria-describedby="run-voice-note">
-          {showSaved && <option value={savedVoice}>{savedLabel}</option>}
-          {groups.map(({ region, options }) => options.length > 0 && (
-            <optgroup key={region} label={`Miền ${region}`}>
-              {options.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
-            </optgroup>
-          ))}
-        </select>
-        <button className="btn" type="button" disabled={disabled || !voice} onClick={playPreview}>
-          {previewActive ? "Dừng nghe" : "Nghe thử"}
-        </button>
-      </div>
+    <fieldset className="field run-voice">
+      <legend>Giọng VieNeu theo vùng miền</legend>
+      {VOICE_REGIONS.map(({ field, region, preferred }) => {
+        const { own, other } = optionsFor(region, preferred);
+        const savedVoice = saved[field];
+        const listed = voices.some(({ id }) => id === savedVoice);
+        const active = previewField === field && (previewStatus === "loading" || previewStatus === "playing");
+        const id = `run-${field.replace("_", "-")}`;
+        return (
+          <div className="voice-row" key={field}>
+            <label htmlFor={id}>Miền {region}</label>
+            <div className="voice-picker">
+              <select id={id} value={values[field]} disabled={disabled}
+                onFocus={loadVoices} onPointerDown={loadVoices}
+                onChange={(event) => {
+                  stopPreview();
+                  onChange(field, event.target.value);
+                }} aria-describedby="run-voice-note">
+                {!listed && <option value={savedVoice}>{savedVoice || "Mặc định"}</option>}
+                {own.length > 0 && (
+                  <optgroup label={`Miền ${region}`}>
+                    {own.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+                  </optgroup>
+                )}
+                {other.length > 0 && (
+                  <optgroup label="Vùng khác">
+                    {other.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+                  </optgroup>
+                )}
+              </select>
+              <button className="btn" type="button" disabled={disabled || !values[field]}
+                aria-label={`${active ? "Dừng nghe" : "Nghe thử"} giọng miền ${region}`} onClick={() => playPreview(field)}>
+                {active ? "Dừng nghe" : "Nghe thử"}
+              </button>
+            </div>
+          </div>
+        );
+      })}
       <small id="run-voice-note" className="muted" aria-live="polite">
         {voiceStatus === "loading" ? "Đang tải danh sách giọng…" :
-          voiceStatus === "error" ? "Chưa tải được danh sách giọng. Bấm lại để thử." : "Áp dụng cho bộ audio tạo mới."}
+          voiceStatus === "error" ? "Chưa tải được danh sách giọng. Bấm lại để thử." :
+            "Mỗi câu dùng giọng theo cột vùng miền; dòng trống/không rõ vùng dùng giọng Bắc. Áp dụng cho bộ audio tạo mới."}
       </small>
       {previewStatus === "loading" && <small role="status" className="muted">Đang tải audio nghe thử…</small>}
       {previewStatus === "error" && <small role="alert" className="warn">Chưa phát được mẫu giọng. Bấm Nghe thử để thử lại.</small>}
-    </div>
+    </fieldset>
   );
 }

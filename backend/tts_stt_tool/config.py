@@ -14,7 +14,9 @@ SETTINGS_FILE = "settings.json"
 @dataclass
 class Settings:
     data_dir: Path
-    voice: str | None = "Ngọc Huyền"
+    voice: str | None = "Ngọc Huyền"  # Miền Bắc, also used for rows whose region is blank or unknown
+    voice_trung: str | None = "Quang Sơn"
+    voice_nam: str | None = "Thùy Dung"
     max_regen: int = 3
     wer_threshold: float = 0.0
     reject_warn_ratio: float = 0.10

@@ -40,6 +40,8 @@ CREATE TABLE IF NOT EXISTS audio_sets (
     source_file TEXT NOT NULL,
     sheets_json TEXT NOT NULL,
     voice TEXT,
+    voice_trung TEXT,
+    voice_nam TEXT,
     created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS items (
@@ -108,7 +110,8 @@ class Store:
             c.executescript(SCHEMA)
             # databases created before these columns
             for table, added in (("app_results", ("text_tts_snap", "audio_snap", "screenshot_path")),
-                                 ("items", ("form_json",))):
+                                 ("items", ("form_json",)),
+                                 ("audio_sets", ("voice_trung", "voice_nam"))):
                 cols = {r["name"] for r in c.execute(f"PRAGMA table_info({table})")}
                 for col in added:
                     if col not in cols:
@@ -128,12 +131,15 @@ class Store:
 
     # -- audio sets -------------------------------------------------------
     def create_audio_set(
-        self, name: str, source_file: str, sheets: list[str], voice: str | None, items: list[InputItem]
+        self, name: str, source_file: str, sheets: list[str], voice: str | None, items: list[InputItem],
+        *, voice_trung: str | None = None, voice_nam: str | None = None,
     ) -> int:
+        """``voice`` is the Miền Bắc voice and the fallback; Trung/Nam rows use their own voice when set."""
         with self._conn() as c:
             cur = c.execute(
-                "INSERT INTO audio_sets(name, source_file, sheets_json, voice, created_at) VALUES (?,?,?,?,?)",
-                (name, source_file, json.dumps(sheets, ensure_ascii=False), voice, _now()),
+                "INSERT INTO audio_sets(name, source_file, sheets_json, voice, voice_trung, voice_nam, created_at)"
+                " VALUES (?,?,?,?,?,?,?)",
+                (name, source_file, json.dumps(sheets, ensure_ascii=False), voice, voice_trung, voice_nam, _now()),
             )
             set_id = int(cur.lastrowid)
             rows = []
@@ -187,6 +193,11 @@ class Store:
                 (audio_set_id, audio_set_id))]
             c.execute("DELETE FROM audio_sets WHERE id=?", (audio_set_id,))
         return {"run_ids": run_ids, "audio_paths": paths}
+
+    def delete_all_audio_sets(self) -> int:
+        """Delete every set with its items, app runs and results (cascade); returns how many sets."""
+        with self._conn() as c:
+            return c.execute("DELETE FROM audio_sets").rowcount
 
     def summary(self, audio_set_id: int) -> dict[str, int]:
         with self._conn() as c:

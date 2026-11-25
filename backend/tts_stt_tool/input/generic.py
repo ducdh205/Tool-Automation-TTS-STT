@@ -31,6 +31,9 @@ _KEYWORDS: dict[str, list[str]] = {
     "turn_col": ["bước / lượt", "bước", "lượt", "turn"],
 }
 
+# Short words that would match unrelated headers ("Các bước thực hiện", "Use case / Req ID") by substring.
+_EXACT_ONLY = {"id", "bước", "lượt", "turn", "text"}
+
 
 @dataclass
 class ColumnMapping:
@@ -64,11 +67,15 @@ def header_labels(cells: list[str]) -> list[str]:
     while cells and not cells[-1]:
         cells.pop()
     labels: list[str] = []
-    seen: dict[str, int] = {}
+    real = set(cells)
     for i, c in enumerate(cells, start=1):
-        name = c or f"Cột {get_column_letter(i)}"
-        seen[name] = seen.get(name, 0) + 1
-        labels.append(name if seen[name] == 1 else f"{name} ({seen[name]})")
+        base = c or f"Cột {get_column_letter(i)}"
+        label, n = base, 1
+        # A label must be unique, and a generated one must not equal another real header.
+        while label in labels or (label != c and label in real):
+            n += 1
+            label = f"{base} ({n})"
+        labels.append(label)
     return labels
 
 
@@ -78,8 +85,10 @@ def suggest_mapping(columns: list[str]) -> dict[str, str]:
     out: dict[str, str] = {}
     for key, words in _KEYWORDS.items():
         found = None
-        for match in (lambda n, w: n == w, lambda n, w: w in n):
+        for loose, match in ((False, lambda n, w: n == w), (True, lambda n, w: w in n)):
             for w in words:
+                if loose and w in _EXACT_ONLY:
+                    continue
                 found = next((i for i, n in enumerate(norm) if i not in taken and match(n, w)), None)
                 if found is not None:
                     break

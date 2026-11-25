@@ -98,6 +98,9 @@ nav { display: flex; flex-direction: column; gap: 2px; }
 .side-block { display: flex; flex-direction: column; gap: 6px; min-height: 0; flex: 1; }
 .side-title { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); padding: 0 8px; font-weight: 600; }
 .side-note { padding: 0 8px; }
+.side-title-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-right: 4px; }
+.clear-all { gap: 4px; font-size: 11.5px; color: var(--muted); padding: 2px 6px; }
+.clear-all:hover:not(:disabled) { color: var(--bad); background: var(--bad-soft); }
 .set-list { display: flex; flex-direction: column; gap: 2px; overflow: auto; }
 .set-item { display: flex; flex-direction: column; gap: 4px; border: 0; background: none; padding: 6px 10px 7px; border-radius: 7px; cursor: pointer; text-align: left; }
 .set-line { display: flex; justify-content: space-between; gap: 8px; min-width: 0; }
@@ -168,7 +171,10 @@ nav { display: flex; flex-direction: column; gap: 2px; }
 .scoring-guide p + p { margin-top: 4px; }
 .scoring-guide ul { padding-inline-start: 16px; }
 .hint { cursor: help; }
-.voice-picker { display: flex; gap: 6px; }
+.run-voice { border: 0; margin: 0; padding: 0; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.run-voice legend { padding: 0; margin-bottom: 2px; }
+.voice-row { display: grid; grid-template-columns: 82px 1fr; align-items: center; gap: 8px; }
+.voice-picker { display: flex; gap: 6px; min-width: 0; }
 .voice-picker select { flex: 1; min-width: 0; }
 
 /* filters & progress */
@@ -256,6 +262,8 @@ nav { display: flex; flex-direction: column; gap: 2px; }
 .modal footer { justify-content: flex-end; }
 .modal footer .small { margin-right: auto; }
 .modal h2 { font-size: 16px; margin: 0; }
+.confirm-modal { width: 420px; max-width: calc(100vw - 32px); }
+.confirm-modal p { margin: 0; line-height: 1.5; }
 .file-drop { border: 1.5px dashed var(--border); border-radius: 10px; padding: 18px; display: flex; justify-content: center; cursor: pointer; }
 .file-drop input { display: none; }
 .file-drop:hover { border-color: var(--accent); }
@@ -279,3 +287,27 @@ nav { display: flex; flex-direction: column; gap: 2px; }
 .log-lines { overflow: auto; flex: 1; min-height: 0; font-family: Consolas, monospace; font-size: 11px; line-height: 1.5; }
 .warn-box { background: var(--warn-soft); color: var(--warn); border-radius: 6px; padding: 6px 8px; }
 .form-grid .radio-line { flex-direction: row; align-items: center; justify-content: flex-start; gap: 8px; font-weight: 400; font-size: 13px; }
+
+/* import dialog */
+.import-modal { width: min(900px, calc(100vw - 32px)); }
+.import-eyebrow { font-size: 10.5px; letter-spacing: .08em; font-weight: 700; color: var(--accent); }
+.import-body { display: flex; flex-direction: column; gap: 14px; overflow: auto; min-height: 0; }
+.import-top { display: grid; grid-template-columns: 2fr 1fr auto; gap: 16px; align-items: end; background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+.import-cell { display: flex; flex-direction: column; gap: 4px; font-size: 12px; min-width: 0; }
+.import-cell select, .import-cell input, .import-field select, .import-field input { border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; background: var(--panel); min-width: 0; }
+.import-total { font-weight: 700; font-size: 15px; padding: 4px 0; }
+.import-sheets { display: flex; flex-direction: column; gap: 6px; }
+.import-sheets .sheet-list { max-height: 120px; }
+.import-keep { display: flex; gap: 6px; align-items: center; font-size: 12px; }
+.import-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px 16px; }
+.import-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; min-width: 0; }
+.import-field > label { font-weight: 600; }
+.import-field > label.req { color: var(--accent); }
+.import-field small.warn { color: var(--warn); }
+.import-table-wrap { overflow: auto; max-height: 220px; border: 1px solid var(--border); border-radius: 8px; margin-top: 6px; }
+.import-table { border-collapse: collapse; font-size: 12px; width: max-content; min-width: 100%; }
+.import-table th, .import-table td { text-align: left; vertical-align: top; padding: 6px 10px; border-bottom: 1px solid var(--border); max-width: 240px; }
+.import-table th { position: sticky; top: 0; background: var(--panel-2); white-space: nowrap; }
+.import-table .mapped { background: var(--accent-soft); }
+.import-table .tag { display: block; color: var(--accent); font-weight: 600; }
+@media (max-width: 720px) { .import-grid, .import-top { grid-template-columns: 1fr; } }

@@ -22,8 +22,8 @@ from tts_stt_tool.device.adb import KEYS, AdbError
 from tts_stt_tool.device.profile import AppProfile, get_profile, list_profiles, save_profile
 from tts_stt_tool.device.ui_tree import node_at, parse_dump
 from tts_stt_tool.input.filters import clean_text, has_words
-from tts_stt_tool.input.generic import ColumnMapping, preview_columns, read_generic
-from tts_stt_tool.input.testcase_form import InputError, list_sheets, read_testcase_items
+from tts_stt_tool.input.generic import ColumnMapping, preview_sheet, read_items, sheet_names
+from tts_stt_tool.input.testcase_form import InputError
 from tts_stt_tool.jobs.runner import JobBusyError
 from tts_stt_tool.pipeline.block1 import run_generate, run_verify
 from tts_stt_tool.pipeline.block2 import run_block2
@@ -79,47 +79,65 @@ async def inspect_file(request: Request, file: UploadFile) -> dict[str, Any]:
     path = ctx.uploads / file_id
     path.write_bytes(await file.read())
     try:
-        if path.suffix.lower() == ".csv":
-            return {"file_id": file_id, "sheets": [], "is_form": False,
-                    "columns": preview_columns(path, None, 1)}
-        sheets = await asyncio.to_thread(list_sheets, path)
-        is_form = any(s.is_testcase for s in sheets)
-        columns = [] if is_form else preview_columns(path, sheets[0].name if sheets else None, 1)
+        sheets = await asyncio.to_thread(sheet_names, path)
     except InputError as e:
         raise HTTPException(422, str(e)) from e
-    return {"file_id": file_id, "is_form": is_form, "columns": columns,
-            "sheets": [s.__dict__ for s in sheets]}
+    return {"file_id": file_id, "sheets": sheets}
+
+
+class PreviewIn(BaseModel):
+    file_id: str
+    sheet: str | None = None
+    header_row: int = Field(1, ge=1)
+
+
+@router.post("/files/preview")
+async def preview_file(request: Request, body: PreviewIn) -> dict[str, Any]:
+    path = _upload_path(ctx_of(request), body.file_id)
+    try:
+        pv = await asyncio.to_thread(preview_sheet, path, body.sheet, body.header_row)
+    except InputError as e:
+        raise HTTPException(422, str(e)) from e
+    return {"columns": pv.columns, "rows": pv.rows, "row_count": pv.row_count, "suggestions": pv.suggestions}
 
 
 class MappingIn(BaseModel):
     text_col: str
+    header_row: int = Field(1, ge=1)
     id_col: str | None = None
-    header_row: int = 1
+    region_col: str | None = None
+    region_value: str | None = None
+    expected_col: str | None = None
+    turn_col: str | None = None
 
 
 class AudioSetIn(BaseModel):
     file_id: str
     sheets: list[str]
     name: str
-    mapping: MappingIn | None = None
+    mapping: MappingIn
 
 
 @router.post("/audio-sets")
 async def create_audio_set(request: Request, body: AudioSetIn) -> dict[str, int]:
     ctx = ctx_of(request)
     path = _upload_path(ctx, body.file_id)
+    m = body.mapping
+    if m.region_col and m.region_value:
+        raise HTTPException(422, "Chọn cột vùng miền hoặc giá trị cố định, không chọn cả hai")
+    if path.suffix.lower() != ".csv" and not body.sheets:
+        raise HTTPException(422, "Chọn ít nhất một sheet")
     try:
-        if body.mapping:
-            sheet = body.sheets[0] if body.sheets else None
-            items = await asyncio.to_thread(read_generic, path, sheet, ColumnMapping(**body.mapping.model_dump()))
-        else:
-            if not body.sheets:
-                raise HTTPException(422, "Chọn ít nhất một sheet")
-            items = await asyncio.to_thread(read_testcase_items, path, body.sheets)
+        items = await asyncio.to_thread(read_items, path, body.sheets, ColumnMapping(**m.model_dump()))
     except InputError as e:
         raise HTTPException(422, str(e)) from e
+    if not items:
+        raise HTTPException(422, "Không có dòng dữ liệu nào")
     source = body.file_id.split("_", 1)[-1]
-    set_id = ctx.store.create_audio_set(body.name or source, source, body.sheets, ctx.settings.voice, items)
+    set_id = ctx.store.create_audio_set(
+        body.name or source, source, body.sheets, ctx.settings.voice, items,
+        voice_trung=ctx.settings.voice_trung, voice_nam=ctx.settings.voice_nam,
+    )
     return {"id": set_id}
 
 
@@ -151,6 +169,38 @@ async def delete_audio_set(request: Request, set_id: int) -> dict[str, bool]:
 
     await asyncio.to_thread(cleanup)
     return {"ok": True}
+
+
+def _empty_dir(path: Path) -> None:
+    """Remove what is inside ``path`` but keep the folder (the audio cache writes into it directly)."""
+    if not path.is_dir():
+        return
+    for child in path.iterdir():
+        if child.is_dir() and not child.is_symlink():
+            shutil.rmtree(child, ignore_errors=True)
+        else:
+            child.unlink(missing_ok=True)
+
+
+@router.delete("/data")
+async def clear_all_data(request: Request) -> dict[str, Any]:
+    """Delete every audio set and the files they produced: WAVs, reports, uploads, screenshots.
+
+    Settings, app profiles, wyoming models and voice previews are kept.
+    """
+    ctx = ctx_of(request)
+    job = ctx.runner.current()
+    if job is not None:  # a running job may be writing rows or files
+        raise HTTPException(409, f"Đang chạy: {job['name']} — dừng job trước khi xóa")
+    count = ctx.store.delete_all_audio_sets()
+    ctx.exports.clear()
+
+    def cleanup() -> None:
+        for d in (ctx.cache.root, ctx.reports, ctx.uploads, ctx.settings.data_dir / "app_runs"):
+            _empty_dir(d)
+
+    await asyncio.to_thread(cleanup)
+    return {"ok": True, "sets": count}
 
 
 @router.get("/audio-sets/{set_id}/items")
@@ -303,6 +353,8 @@ class SettingsIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     voice: str | None = None
+    voice_trung: str | None = None
+    voice_nam: str | None = None
     max_regen: int = Field(ge=0, le=10)
     wer_threshold: float = Field(ge=0, le=1)
     reject_warn_ratio: float = Field(ge=0, le=1)

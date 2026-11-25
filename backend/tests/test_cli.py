@@ -3,7 +3,8 @@ from pathlib import Path
 from tts_stt_tool.cli import parse_args
 
 
-def test_defaults():
+def test_defaults(monkeypatch):
+    monkeypatch.delenv("TTS_STT_DATA_DIR", raising=False)
     a = parse_args([])
     assert a.data_dir == Path("data")
     assert a.port is None
@@ -15,6 +16,13 @@ def test_overrides():
     assert a.data_dir == Path("x")
     assert a.port == 9000
     assert a.no_browser is True
+
+
+def test_data_dir_from_env(monkeypatch):
+    """The portable launcher (launch.py) points the data dir next to the app this way."""
+    monkeypatch.setenv("TTS_STT_DATA_DIR", "C:/somewhere/data")
+    assert parse_args([]).data_dir == Path("C:/somewhere/data")
+    assert parse_args(["--data-dir", "x"]).data_dir == Path("x")
 
 
 def test_utf8_console_reconfigures_cp1252_stream():

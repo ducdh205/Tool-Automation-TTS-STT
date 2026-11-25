@@ -21,6 +21,7 @@ from tts_stt_tool.store.db import ItemStatus, Store
 from tts_stt_tool.stt.wyoming_client import SttEngine, SttError
 from tts_stt_tool.tts.base import TtsEngine
 from tts_stt_tool.tts.cache import AudioCache
+from tts_stt_tool.tts.regions import voice_for
 
 _LOG = logging.getLogger(__name__)
 MAX_CONSECUTIVE_ERRORS = 3
@@ -46,7 +47,9 @@ async def run_generate(
     regenerate: bool = False,
 ) -> None:
     audio_set = store.get_audio_set(audio_set_id) or {}
-    voice = audio_set.get("voice") or settings.voice or ""
+    # sets made before per-region voices have no voice_trung/voice_nam: those rows keep the set's voice
+    voices = audio_set if audio_set.get("voice") else {
+        "voice": settings.voice, "voice_trung": settings.voice_trung, "voice_nam": settings.voice_nam}
     query = store.items_for_regenerate if regenerate else store.items_for_generate
     todo = query(audio_set_id, item_ids)
     total = len(todo)
@@ -60,6 +63,7 @@ async def run_generate(
             continue
         text = item["text_tts"]
         attempt = item["attempts"] if regenerate else 0
+        voice = voice_for(item.get("region"), voices)
         try:
             path = await cache.get_or_synthesize(tts, text, voice, attempt)
             if not store.record_generated(item["id"], str(path), attempt + 1, text_tts=text):

@@ -8,3 +8,5 @@ __pycache__/
 vendor/
 .superpowers/
 frontend/*.tsbuildinfo
+build/
+dist/

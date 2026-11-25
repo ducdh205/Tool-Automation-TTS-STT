@@ -93,12 +93,23 @@ export default function App() {
     api.settings().then(setSettings).catch(() => setSettingsLoadFailed(true));
   }, []);
 
-  const saveSettings = async (changes: Partial<Settings>) => {
+  const saveSettings = async (changes: Partial<Settings>, purgeSets = false) => {
     if (!settings) return;
     setSettingsSaving(true);
     try {
       setSettings(await api.saveSettings({ ...settings, ...changes }));
-      notify("Đã lưu cài đặt.");
+      if (!purgeSets) {
+        notify("Đã lưu cài đặt.");
+        return;
+      }
+      // Settings are saved either way; a failed delete is reported, not thrown back into the panel.
+      const old = [...sets];
+      let failed = 0;
+      for (const s of old) await api.deleteSet(s.id).catch(() => { failed += 1; });
+      const left = await loadSets().catch(() => [] as AudioSet[]);
+      setSetId(left[0]?.id ?? null);
+      if (failed) notify(`Đã lưu cài đặt, nhưng ${failed}/${old.length} bộ audio cũ chưa xóa được.`, "error");
+      else notify(`Đã lưu cài đặt và xóa ${old.length} bộ audio cũ.`);
     } finally {
       setSettingsSaving(false);
     }
@@ -281,6 +292,17 @@ export default function App() {
     }
   };
 
+  const clearAll = async () => {
+    try {
+      const { sets: n } = await api.clearAllData();
+      const left = await loadSets();
+      setSetId(left[0]?.id ?? null);
+      notify(`Đã xóa toàn bộ dữ liệu (${n} bộ audio).`);
+    } catch (e) {
+      notify((e as Error).message, "error");
+    }
+  };
+
   const report = async (format: "xlsx" | "csv") => {
     if (setId === null) return;
     try {
@@ -337,6 +359,7 @@ export default function App() {
         currentSetId={setId}
         onSelectSet={setSetId}
         onDeleteSet={deleteSet}
+        onClearAll={clearAll}
         deleteLocked={job ? `Đang chạy: ${job.name} — dừng job trước khi xóa` : null}
         device={deviceStatus}
       />
@@ -346,7 +369,9 @@ export default function App() {
             <h1 className="ellipsis">{current ? current.name : "Chưa có bộ audio"}</h1>
             {current && (
               <span className="muted small ellipsis" title={current.sheets.join(", ")}>
-                {current.source_file} · {current.sheets.length} sheet · giọng {current.voice ?? "mặc định"}
+                {current.source_file} · {current.sheets.length} sheet · giọng Bắc {current.voice ?? "mặc định"}
+                {" · "}Trung {current.voice_trung || current.voice || "mặc định"}
+                {" · "}Nam {current.voice_nam || current.voice || "mặc định"}
               </span>
             )}
           </div>
@@ -373,7 +398,7 @@ export default function App() {
           onReport={report}
           settingsSaving={settingsSaving}
           settingsControls={settings ? (
-            <RunSettings settings={settings} busy={!!job} saving={settingsSaving} onSave={saveSettings} />
+            <RunSettings settings={settings} busy={!!job} saving={settingsSaving} setCount={sets.length} onSave={saveSettings} />
           ) : settingsLoadFailed ? (
             <span className="small">Chưa tải được cài đặt. <button className="link-btn" onClick={loadSettings}>Thử lại</button></span>
           ) : <span className="muted small">Đang tải cài đặt…</span>}
@@ -429,7 +454,6 @@ export default function App() {
         <ImportDialog
           onClose={() => setDialog(null)}
           onCreated={async (id) => {
-            setDialog(null);
             await loadSets();
             setSetId(id);
             setFilter("all");

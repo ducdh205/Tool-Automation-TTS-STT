@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import threading
 import webbrowser
 from pathlib import Path
@@ -11,7 +12,8 @@ from pathlib import Path
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(prog="tts-stt-tool", description="TTS → STT automation test tool")
-    p.add_argument("--data-dir", type=Path, default=Path("data"), help="thư mục dữ liệu (mặc định ./data)")
+    p.add_argument("--data-dir", type=Path, default=Path(os.environ.get("TTS_STT_DATA_DIR") or "data"),
+                   help="thư mục dữ liệu (mặc định ./data, hoặc biến TTS_STT_DATA_DIR)")
     p.add_argument("--port", type=int, default=None, help="cổng web (mặc định theo Cài đặt, 8765)")
     p.add_argument("--no-browser", action="store_true", help="không tự mở trình duyệt")
     return p.parse_args(argv)

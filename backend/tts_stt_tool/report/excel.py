@@ -12,6 +12,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
+from tts_stt_tool.tts.regions import voices_label
 from tts_stt_tool.config import Settings
 from tts_stt_tool.store.db import AppStatus, ItemStatus, Store
 
@@ -99,7 +100,7 @@ def _overview(ws: Any, store: Store, audio_set_id: int, settings: Settings, item
         ("Bộ audio", s.get("name"), None),
         ("File input", s.get("source_file"), None),
         ("Sheet", ", ".join(s.get("sheets", [])), None),
-        ("Giọng", s.get("voice"), None),
+        ("Giọng", voices_label(s), None),
         ("Tạo lúc", s.get("created_at"), None),
         ("Xuất lúc", datetime.now().isoformat(timespec="seconds"), None),
         ("Tổng số dòng", len(items), None),

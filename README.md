@@ -131,8 +131,40 @@ Tất cả nằm trong `data/` (không commit): `settings.json`, `tool.db` (SQLi
 khi chạy lại), `reports/`, `uploads/`, `app_runs/<phiên>/` (ảnh chụp màn hình khi Sai / Lỗi thao tác),
 `wyoming/` (model + log `server.log`).
 
+Nút **Xóa tất cả** cạnh tiêu đề *Bộ audio* ở thanh trái xóa toàn bộ dữ liệu output: mọi bộ audio, các lần test app,
+`audio/`, `reports/`, `uploads/`, `app_runs/`. Giữ lại `settings.json`, `profiles/`, `wyoming/` và giọng nghe thử.
+Không hoàn tác được; bị khóa khi đang chạy job.
+
 Thêm từ tương đương cho so sánh (ví dụ `SĐT` = `số điện thoại`):
 [backend/tts_stt_tool/compare/rules.json](backend/tts_stt_tool/compare/rules.json).
+
+## Đóng gói bản portable offline (folder + .bat)
+
+Tạo thư mục `dist\TTS-STT-Tool\` chứa đủ mọi thứ (2 Python, thư viện, giao diện, adb, model VieNeu + wyoming)
+và file chạy `TTS-STT-Tool.bat`. Máy đích **không cần mạng, không cần cài Python/uv/Node/Git**, không cần
+quyền admin, không cần cài đặt — copy cả thư mục là chạy.
+
+Trên máy build (đã làm bước *Cài đặt* ở trên):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File packaging\build.ps1 -Zip
+```
+
+Lần đầu khoảng 10–20 phút. Script tự smoke test bản đóng gói ở chế độ offline (sinh audio, wyoming nghe lại).
+Tham số: `-Zip` (nén thêm `dist\TTS-STT-Tool-<version>.zip`, không kèm `data\`, tiện copy qua USB/mạng),
+`-SkipFrontend` (dùng `frontend\dist` sẵn có), `-SkipSmokeTest`. Thư mục `models\` và `data\` trong
+`dist\TTS-STT-Tool` được giữ lại giữa các lần build.
+
+Trên máy đích: copy/giải nén thư mục vào chỗ ghi được (vd. `D:\TTS-STT-Tool`, **không** để trong
+`Program Files`), bấm đúp **`TTS-STT-Tool.bat`** (muốn có shortcut thì *Send to → Desktop*). Một cửa sổ console
+hiện ra, trình duyệt tự mở; **đóng cửa sổ console là tắt tool** (wyoming tắt theo). Chạy lại `.bat` khi tool
+đang chạy chỉ mở lại trình duyệt. Có thể truyền tham số như khi chạy dev: `TTS-STT-Tool.bat --port 9000`.
+
+Dữ liệu (db, audio, báo cáo, hồ sơ app) nằm trong `data\` ngay trong thư mục tool. Lên bản mới: copy `data\`
+từ thư mục cũ sang thư mục mới. Muốn để dữ liệu chỗ khác: đặt biến môi trường `TTS_STT_DATA_DIR`.
+
+Lưu ý: Python đóng kèm **không có chữ ký số**. Máy bật Smart App Control có thể chặn `python.exe` — cần
+tắt Smart App Control trên máy đó. Bản đóng gói chạy VieNeu bằng CPU.
 
 ## Phát triển
 

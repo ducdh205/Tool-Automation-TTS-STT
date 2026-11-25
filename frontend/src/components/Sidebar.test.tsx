@@ -99,3 +99,38 @@ describe("Sidebar audio sets", () => {
     expect(del.title).toBe("Đang chạy job");
   });
 });
+
+describe("Sidebar clear all data", () => {
+  const set = { id: 3, name: "Bộ A", source_file: "f.xlsx", sheets: ["S1"], voice: null,
+    created_at: "", summary: { "Chờ": 2 } };
+  const base = { section: "step1" as const, step2Ready: true, onSection: () => {}, health: null,
+    sets: [set, { ...set, id: 4, name: "Bộ B" }], currentSetId: 3, onSelectSet: () => {} };
+
+  it("clears everything after the user confirms", () => {
+    const onClearAll = vi.fn();
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<Sidebar {...base} onClearAll={onClearAll} />);
+    fireEvent.click(screen.getByRole("button", { name: "Xóa toàn bộ dữ liệu" }));
+    expect(confirm.mock.calls[0][0]).toContain("2 bộ audio");
+    expect(confirm.mock.calls[0][0]).toContain("Cài đặt và hồ sơ app được giữ lại");
+    expect(onClearAll).toHaveBeenCalledTimes(1);
+  });
+
+  it("does nothing when the user cancels", () => {
+    const onClearAll = vi.fn();
+    vi.spyOn(window, "confirm").mockReturnValue(false);
+    render(<Sidebar {...base} onClearAll={onClearAll} />);
+    fireEvent.click(screen.getByRole("button", { name: "Xóa toàn bộ dữ liệu" }));
+    expect(onClearAll).not.toHaveBeenCalled();
+  });
+
+  it("is locked while a job runs and hidden without a handler", () => {
+    const { unmount } = render(<Sidebar {...base} onClearAll={() => {}} deleteLocked="Đang chạy job" />);
+    const btn = screen.getByRole("button", { name: "Xóa toàn bộ dữ liệu" }) as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+    expect(btn.title).toBe("Đang chạy job");
+    unmount();
+    render(<Sidebar {...base} />);
+    expect(screen.queryByRole("button", { name: "Xóa toàn bộ dữ liệu" })).toBeNull();
+  });
+});

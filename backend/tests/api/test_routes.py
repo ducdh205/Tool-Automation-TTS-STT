@@ -37,9 +37,16 @@ def upload_form(client, tmp_path):
     return r.json()
 
 
+FORM_MAPPING = {
+    "header_row": 4, "id_col": "TC_ID", "text_col": "Câu nói (utterance)", "region_col": "Vùng miền",
+    "expected_col": "Kết quả mong đợi", "turn_col": "Bước / Lượt",
+}
+
+
 def create_set(client, tmp_path):
     info = upload_form(client, tmp_path)
-    r = client.post("/api/audio-sets", json={"file_id": info["file_id"], "sheets": [FORM_SHEET], "name": "bộ 1"})
+    r = client.post("/api/audio-sets", json={"file_id": info["file_id"], "sheets": [FORM_SHEET], "name": "bộ 1",
+                                             "mapping": FORM_MAPPING})
     assert r.status_code == 200, r.text
     return r.json()["id"]
 
@@ -65,11 +72,47 @@ def statuses(client, set_id):
     return {i["id"]: i["status"] for i in client.get(f"/api/audio-sets/{set_id}/items").json()}
 
 
-def test_inspect_detects_form(client, tmp_path):
+def test_inspect_lists_sheets(client, tmp_path):
     info = upload_form(client, tmp_path)
-    assert info["is_form"] is True
-    sheets = {s["name"]: s for s in info["sheets"]}
-    assert sheets[FORM_SHEET]["item_count"] == 3
+    assert info["sheets"] == ["Tổng hợp", "Hướng dẫn", FORM_SHEET]
+    assert "is_form" not in info
+
+
+def test_preview_route(client, tmp_path):
+    info = upload_form(client, tmp_path)
+    ok = client.post("/api/files/preview", json={"file_id": info["file_id"], "sheet": FORM_SHEET, "header_row": 4})
+    assert ok.status_code == 200
+    assert ok.json()["row_count"] == 4
+    assert ok.json()["suggestions"]["id_col"] == "TC_ID"
+    for bad in (99, 0):
+        r = client.post("/api/files/preview", json={"file_id": info["file_id"], "sheet": FORM_SHEET, "header_row": bad})
+        assert r.status_code == 422
+
+
+def test_create_set_missing_column_names_sheet(client, tmp_path):
+    info = upload_form(client, tmp_path)
+    r = client.post("/api/audio-sets", json={"file_id": info["file_id"], "sheets": [FORM_SHEET, "Tổng hợp"],
+                                             "name": "x", "mapping": FORM_MAPPING})
+    assert r.status_code == 422
+    assert "Tổng hợp" in r.json()["detail"]
+    assert client.get("/api/audio-sets").json() == []
+
+
+def test_create_set_rejects_region_conflict_and_missing_sheets(client, tmp_path):
+    info = upload_form(client, tmp_path)
+    both = {**FORM_MAPPING, "region_value": "NAM-HCM"}
+    r = client.post("/api/audio-sets", json={"file_id": info["file_id"], "sheets": [FORM_SHEET], "name": "x",
+                                             "mapping": both})
+    assert r.status_code == 422
+    r = client.post("/api/audio-sets", json={"file_id": info["file_id"], "sheets": [], "name": "x",
+                                             "mapping": FORM_MAPPING})
+    assert r.status_code == 422
+
+
+def test_create_set_keeps_form_cells(client, tmp_path):
+    set_id = create_set(client, tmp_path)
+    cells = client.app.state.ctx.store.form_cells(set_id)
+    assert len(cells) == 3 and all(len(v) == 36 for v in cells.values())
 
 
 def test_voice_preview_caches_a_wav_for_the_selected_preset(client, monkeypatch):
@@ -101,8 +144,9 @@ def test_inspect_csv_returns_columns(client, tmp_path):
     p.write_text("id,cau\n1,Bật đèn\n", encoding="utf-8")
     with p.open("rb") as f:
         info = client.post("/api/files/inspect", files={"file": ("a.csv", f)}).json()
-    assert info["is_form"] is False
-    assert info["columns"] == ["id", "cau"]
+    assert info["sheets"] == []
+    pv = client.post("/api/files/preview", json={"file_id": info["file_id"], "sheet": None, "header_row": 1}).json()
+    assert pv["columns"] == ["id", "cau"]
     r = client.post("/api/audio-sets", json={"file_id": info["file_id"], "sheets": [], "name": "csv",
                                              "mapping": {"text_col": "cau", "id_col": "id"}})
     assert r.status_code == 200
@@ -319,6 +363,26 @@ def test_delete_audio_set_while_job_runs_is_409(tmp_path):
         wait_job_end(c)
         assert c.post(f"/api/audio-sets/{set_id}/verify").status_code == 200
         assert c.delete(f"/api/audio-sets/{set_id}").status_code == 409
+        assert c.get(f"/api/audio-sets/{set_id}/items").status_code == 200
+        job = c.get("/api/jobs/current").json()
+        c.post(f"/api/jobs/{job['id']}/cancel")
+        wait_job_end(c)
+
+
+def test_clear_all_data_while_job_runs_is_409(tmp_path):
+    class SlowStt:
+        async def transcribe(self, audio, sr):
+            import asyncio
+            await asyncio.sleep(0.5)
+            return "x"
+
+    app = create_app(Settings(data_dir=tmp_path), tts=FakeTts(), stt=SlowStt(), manage_wyoming=False)
+    with TestClient(app) as c:
+        set_id = create_set(c, tmp_path)
+        assert c.post(f"/api/audio-sets/{set_id}/generate").status_code == 200
+        wait_job_end(c)
+        assert c.post(f"/api/audio-sets/{set_id}/verify").status_code == 200
+        assert c.delete("/api/data").status_code == 409
         assert c.get(f"/api/audio-sets/{set_id}/items").status_code == 200
         job = c.get("/api/jobs/current").json()
         c.post(f"/api/jobs/{job['id']}/cancel")

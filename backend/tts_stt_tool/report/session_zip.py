@@ -9,6 +9,7 @@ import zipfile
 from pathlib import Path
 from typing import Any, Literal
 
+from tts_stt_tool.tts.regions import voices_label
 from tts_stt_tool.config import Settings
 from tts_stt_tool.report.excel import build_block1_report, format_ops
 from tts_stt_tool.report.form_export import build_form_report
@@ -58,7 +59,7 @@ def _session_info(store: Store, run: dict[str, Any], settings: Settings, results
         f"Phiên test: #{run['id']}",
         f"Bộ audio: {s.get('name', '')}",
         f"File nguồn: {s.get('source_file', '')}",
-        f"Giọng: {s.get('voice') or settings.voice or ''}",
+        f"Giọng: {voices_label(s if s.get('voice') else settings)}",
         f"Thiết bị: {run.get('device_model') or 'Android'} ({run.get('serial')})",
         f"Hồ sơ app: {run.get('profile_name')}",
         f"Phiên bản app: {run.get('app_version') or '—'}",

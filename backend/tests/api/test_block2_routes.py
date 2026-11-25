@@ -215,3 +215,34 @@ def test_delete_audio_set_removes_app_run_files(ctx):
     assert c.delete(f"/api/audio-sets/{set_id}").status_code == 200
     assert not run_dir.exists()
     assert c.get(f"/api/app-runs/{run_id}/results").status_code == 404
+
+
+def test_clear_all_data_removes_outputs_and_keeps_settings(ctx):
+    c, app, _, tmp_path = ctx
+    name = fast_profile(c)
+    set_id = verified_set(c, tmp_path)
+    run_id = c.post(f"/api/audio-sets/{set_id}/app-runs", json={"serial": "SER", "profile": name}).json()["id"]
+    wait_job_end(c)
+    actx = app.state.ctx
+    run_dir = actx.run_dir(run_id)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "shot.png").write_bytes(b"png")
+    assert c.post(f"/api/audio-sets/{set_id}/report?format=csv").status_code == 200
+    assert c.put("/api/settings", json={**c.get("/api/settings").json(), "wer_threshold": 0.2}).status_code == 200
+    assert any(actx.cache.root.iterdir()) and any(actx.reports.iterdir()) and any(actx.uploads.iterdir())
+
+    r = c.delete("/api/data")
+
+    assert r.status_code == 200, r.text
+    assert r.json() == {"ok": True, "sets": 1}
+    assert c.get("/api/audio-sets").json() == []
+    assert c.get(f"/api/app-runs/{run_id}/results").status_code == 404
+    for d in (actx.cache.root, actx.reports, actx.uploads, actx.settings.data_dir / "app_runs"):
+        assert not d.exists() or not any(d.iterdir()), d
+    # kept: settings, app profiles
+    assert (tmp_path / "settings.json").is_file()
+    assert c.get("/api/settings").json()["wer_threshold"] == 0.2
+    assert any(p["name"] == name for p in c.get("/api/profiles").json())
+    # the tool keeps working: a new set can be generated into the emptied audio cache
+    new_id = create_set(c, tmp_path)
+    verify_all(c, new_id)

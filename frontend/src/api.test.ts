@@ -34,3 +34,14 @@ test("deleteSet sends DELETE for the audio set", async () => {
 
   expect(fetchMock).toHaveBeenCalledWith("/api/audio-sets/4", expect.objectContaining({ method: "DELETE" }));
 });
+
+test("clearAllData sends DELETE /api/data", async () => {
+  const fetchMock = vi.fn().mockResolvedValue(
+    new Response(JSON.stringify({ ok: true, sets: 2 }), { status: 200, headers: { "Content-Type": "application/json" } }),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+
+  expect(await api.clearAllData()).toEqual({ ok: true, sets: 2 });
+
+  expect(fetchMock).toHaveBeenCalledWith("/api/data", expect.objectContaining({ method: "DELETE" }));
+});

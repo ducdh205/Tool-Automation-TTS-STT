@@ -7,6 +7,7 @@ import os
 import subprocess
 from pathlib import Path
 
+from tts_stt_tool.stt.winjob import kill_with_this_process
 from tts_stt_tool.stt.wyoming_client import SttError
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -14,17 +15,31 @@ VENDOR_DIR = REPO_ROOT / "vendor" / "wyoming-vietnamese"
 LAUNCHER = Path(__file__).with_name("wyoming_win_launcher.py")
 
 
-def default_wyoming_launch(data_dir: Path, port: int) -> tuple[list[str], Path, dict[str, str]]:
-    """Command, cwd and env to run vendor/wyoming-vietnamese (see docs/spikes)."""
+def wyoming_python() -> Path:
+    """Python for wyoming: the portable build's bundled runtime, else vendor/wyoming-vietnamese/.venv."""
+    bundled = REPO_ROOT / "runtime" / "py314" / "python.exe"
+    if bundled.exists():
+        return bundled
     python = VENDOR_DIR / ".venv" / "Scripts" / "python.exe"
     if not python.exists():
         python = VENDOR_DIR / ".venv" / "bin" / "python"
-    wy = (data_dir / "wyoming").resolve()
+    return python
+
+
+def default_wyoming_launch(data_dir: Path, port: int) -> tuple[list[str], Path, dict[str, str]]:
+    """Command, cwd and env to run vendor/wyoming-vietnamese (see docs/spikes).
+
+    Models live in ``<data_dir>/wyoming`` unless ``TTS_STT_WYOMING_DIR`` points elsewhere
+    (the portable build ships them pre-downloaded next to the app).
+    """
+    python = wyoming_python()
+    wy = Path(os.environ.get("TTS_STT_WYOMING_DIR") or data_dir / "wyoming").resolve()
     env = {
         "CACHE_DIR": str(wy / "cache"),
         "DOWNLOAD_DIR": str(wy / "models"),
         "WYOMING_PORT": str(port),
         "PYTHONIOENCODING": "utf-8",
+        "PYTHONPATH": "",  # don't leak the parent's site-packages (different Python/numpy)
         "HF_HUB_DISABLE_SYMLINKS_WARNING": "1",
     }
     return [str(python), str(LAUNCHER)], VENDOR_DIR, env
@@ -86,6 +101,7 @@ class WyomingServerManager:
                 )
             except OSError as e:
                 raise SttError(f"Không khởi động được wyoming: {e}") from e
+            kill_with_this_process(self.process)
         loop = asyncio.get_running_loop()
         deadline = loop.time() + self.start_timeout_s
         while loop.time() < deadline:

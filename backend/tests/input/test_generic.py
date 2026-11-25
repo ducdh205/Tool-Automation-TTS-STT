@@ -144,3 +144,15 @@ def test_csv_header_row_2(tmp_path):
     p.write_text("ghi chú\nid,cau\n1,Mở cốp\n", encoding="utf-8")
     items = read_items(p, [], ColumnMapping(text_col="cau", id_col="id", header_row=2))
     assert len(items) == 1 and items[0].source_row == 3
+
+
+def test_header_labels_never_collide():
+    assert len(set(header_labels(["X", "X", "X (2)"]))) == 3
+    labels = header_labels(["a", "Cột A", "", "Cột C"])
+    assert len(set(labels)) == len(labels)
+
+
+def test_suggest_mapping_ignores_loose_matches():
+    s = suggest_mapping(["Use case / Req ID", "Các bước thực hiện", "Câu nói (utterance)"])
+    assert "id_col" not in s and "turn_col" not in s
+    assert s["text_col"] == "Câu nói (utterance)"

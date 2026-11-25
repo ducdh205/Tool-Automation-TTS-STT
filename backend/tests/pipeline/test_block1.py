@@ -306,3 +306,22 @@ async def test_per_item_tts_failures_do_not_abort(env):
     events = await generate(store, set_id, BrokenTts(), cache, settings)
     assert events[-1].kind == "done"
     assert store.summary(set_id) == {ItemStatus.ERROR.value: 3, ItemStatus.GENERATED.value: 1}
+
+
+def test_generate_uses_the_voice_of_each_rows_region(env):
+    store, settings, cache = env
+    rows = [("Bắc", "một"), ("BAC-HN", "hai"), ("Miền Trung", "ba"), ("Nam", "bốn"), ("", "năm"), ("??", "sáu")]
+    items = [InputItem(sheet="S", tc_id=f"TC-{i}", turn="1", feature="", priority="", region=r, speaker="",
+                       text_raw=t, expected="", source_row=i) for i, (r, t) in enumerate(rows)]
+    set_id = store.create_audio_set("s", "f.xlsx", ["S"], "Bắc-voice", items,
+                                    voice_trung="Trung-voice", voice_nam="Nam-voice")
+    used: dict[str, str] = {}
+
+    class VoiceTts(FakeTts):
+        def synthesize(self, text, voice, attempt):
+            used[text] = voice
+            return super().synthesize(text, voice, attempt)
+
+    asyncio.run(run_generate(store, set_id, VoiceTts(), cache, settings, lambda e: None, asyncio.Event()))
+    assert used == {"một": "Bắc-voice", "hai": "Bắc-voice", "ba": "Trung-voice", "bốn": "Nam-voice",
+                    "năm": "Bắc-voice", "sáu": "Bắc-voice"}
