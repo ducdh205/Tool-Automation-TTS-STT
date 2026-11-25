@@ -21,12 +21,3 @@ class InputItem:
     source_row: int
     # Cells A..AJ of the testcase form as text (36 entries); empty for other inputs.
     form: list[str] = field(default_factory=list)
-
-
-@dataclass
-class SheetInfo:
-    """A sheet of an input workbook."""
-
-    name: str
-    item_count: int
-    is_testcase: bool
