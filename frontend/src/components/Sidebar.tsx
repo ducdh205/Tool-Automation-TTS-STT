@@ -73,7 +73,6 @@ export function Sidebar({
                   onClick={() => importInput.current?.click()}
                 >
                   <Icon name="upload" size={13} />
-                  <span>Nạp</span>
                 </button>
                 <input
                   ref={importInput}

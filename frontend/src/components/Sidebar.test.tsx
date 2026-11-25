@@ -107,7 +107,10 @@ describe("Sidebar export / import", () => {
   it("imports the zip the user picks, and lets the same file be picked again", () => {
     const onImportSet = vi.fn();
     const { container } = render(<Sidebar {...base} onImportSet={onImportSet} />);
-    expect(screen.getByRole("button", { name: "Nạp bộ audio" })).toBeTruthy();
+    const importBtn = screen.getByRole("button", { name: "Nạp bộ audio" });
+    // Icon only: a text label made the "Bộ audio" title row wrap onto two lines.
+    expect(importBtn.textContent).toBe("");
+    expect(importBtn.title).toBe("Nạp bộ audio từ file .zip đã xuất");
     const input = container.querySelector('input[type="file"]') as HTMLInputElement;
     expect(input.accept).toBe(".zip");
     const file = new File(["x"], "bo.zip");
