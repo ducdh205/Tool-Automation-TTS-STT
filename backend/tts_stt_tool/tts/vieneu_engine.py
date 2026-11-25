@@ -20,24 +20,27 @@ class VieneuEngine:
         self._mode = mode
         self._device = device
         self._tts: Any = None
+        self._loaded_for: str | None = None  # the device asked for when the model was loaded
         self._lock = threading.Lock()
         self.active_device: str | None = None  # what the loaded model runs on (None = not loaded yet)
         self.load_error: str | None = None  # why CUDA could not be used, when it fell back to CPU
 
     def set_device(self, device: str) -> None:
-        """Switch CPU/CUDA: drop the loaded model so the next call reloads it."""
-        with self._lock:
-            self._device = device
-            self._tts = None
+        """Switch CPU/CUDA: the next call reloads the model. Never takes the model lock, so an async
+        route can call it while a load or synthesis is running (that one finishes on the old device)."""
+        self._device = device
+        if self._loaded_for != device:
             self.active_device = None
             self.load_error = None
 
     def _model(self) -> Any:
         with self._lock:
-            if self._tts is None:
+            if self._tts is None or self._loaded_for != self._device:
                 from vieneu import Vieneu  # heavy import, load lazily
 
-                device = self._device
+                self._tts = None
+                self.load_error = None
+                device = self._loaded_for = self._device
                 if device == "cuda":
                     try:
                         self._tts = Vieneu(mode=self._mode, device="cuda")

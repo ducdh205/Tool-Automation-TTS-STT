@@ -71,3 +71,21 @@ def test_cuda_load_failure_falls_back_to_cpu(fake_vieneu):
     assert [c["device"] for c in mod.calls] == ["cuda", "cpu"]
     assert eng.active_device == "cpu"
     assert "no cuda" in eng.load_error
+
+
+def test_set_device_does_not_wait_for_a_running_load(fake_vieneu):
+    """set_device is called from async routes: it must not block on a model load / synthesis in progress."""
+    import threading
+
+    mod = fake_vieneu()
+    eng = VieneuEngine()
+    eng._lock.acquire()  # a load or synthesis holds the model lock
+    try:
+        t = threading.Thread(target=eng.set_device, args=("cuda",))
+        t.start()
+        t.join(1)
+        assert not t.is_alive()
+    finally:
+        eng._lock.release()
+    eng._model()
+    assert [c["device"] for c in mod.calls] == ["cuda"]
