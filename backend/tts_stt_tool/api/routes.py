@@ -27,6 +27,7 @@ from tts_stt_tool.input.testcase_form import InputError
 from tts_stt_tool.jobs.runner import JobBusyError
 from tts_stt_tool.pipeline.block1 import run_generate, run_verify
 from tts_stt_tool.pipeline.block2 import run_block2
+from tts_stt_tool.report.audio_set_zip import PackError, build_audio_set_zip, import_audio_set_zip, pack_name
 from tts_stt_tool.report.excel import build_block1_report, export_block1_csv
 from tts_stt_tool.report.form_export import build_form_report
 from tts_stt_tool.report.session_zip import build_session_zip, session_root_name
@@ -145,6 +146,48 @@ async def create_audio_set(request: Request, body: AudioSetIn) -> dict[str, int]
 def list_audio_sets(request: Request) -> list[dict[str, Any]]:
     ctx = ctx_of(request)
     return [{**s, "summary": ctx.store.summary(s["id"])} for s in ctx.store.list_audio_sets()]
+
+
+def _require_no_job(ctx: AppContext, what: str) -> None:
+    job = ctx.runner.current()
+    if job is not None:  # a running job may be writing rows or WAVs
+        raise HTTPException(409, f"Đang chạy: {job['name']} — dừng job trước khi {what}")
+
+
+@router.post("/audio-sets/import")
+async def import_audio_set(request: Request, file: UploadFile) -> dict[str, int]:
+    """Load a zip made by "Xuất" as a NEW audio set (never overwrites one)."""
+    ctx = ctx_of(request)
+    _require_no_job(ctx, "nạp bộ audio")
+    ctx.uploads.mkdir(parents=True, exist_ok=True)
+    tmp = ctx.uploads / f"{uuid.uuid4().hex[:8]}_import.zip"
+    try:
+        tmp.write_bytes(await file.read())
+        try:
+            return await asyncio.to_thread(import_audio_set_zip, ctx.store, tmp, ctx.cache.root)
+        except PackError as e:
+            raise HTTPException(422, str(e)) from e
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+@router.post("/audio-sets/{set_id}/export")
+async def export_audio_set(request: Request, set_id: int) -> dict[str, str]:
+    """Build the set's zip (manifest + WAVs), then hand out a one-time GET link like the session zip."""
+    ctx = ctx_of(request)
+    audio_set = _require_set(ctx, set_id)
+    _require_no_job(ctx, "xuất bộ audio")
+    _sweep_exports(ctx)
+    ctx.exports_dir.mkdir(parents=True, exist_ok=True)
+    token = uuid.uuid4().hex
+    out = ctx.exports_dir / f"{token}.zip"
+    try:
+        await asyncio.to_thread(build_audio_set_zip, ctx.store, set_id, out)
+    except BaseException:
+        out.unlink(missing_ok=True)  # never leave a half-written zip behind
+        raise
+    ctx.exports[token] = (out, pack_name(audio_set))
+    return {"download_url": f"/api/exports/{token}"}
 
 
 @router.delete("/audio-sets/{set_id}")

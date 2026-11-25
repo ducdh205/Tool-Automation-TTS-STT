@@ -387,3 +387,84 @@ def test_clear_all_data_while_job_runs_is_409(tmp_path):
         job = c.get("/api/jobs/current").json()
         c.post(f"/api/jobs/{job['id']}/cancel")
         wait_job_end(c)
+
+
+def export_set_zip(client, set_id):
+    r = client.post(f"/api/audio-sets/{set_id}/export")
+    assert r.status_code == 200, r.text
+    dl = client.get(r.json()["download_url"])
+    assert dl.status_code == 200 and dl.headers["content-type"] == "application/zip"
+    return dl.content
+
+
+def import_set_zip(client, data, name="x.zip"):
+    return client.post("/api/audio-sets/import", files={"file": (name, data)})
+
+
+def test_export_then_import_restores_a_verified_set(client, tmp_path):
+    set_id = create_set(client, tmp_path)
+    verify_all(client, set_id)
+    before = statuses(client, set_id)
+    assert "Đạt" in before.values()
+    data = export_set_zip(client, set_id)
+    assert client.delete(f"/api/audio-sets/{set_id}").status_code == 200
+
+    r = import_set_zip(client, data)
+
+    assert r.status_code == 200, r.text
+    assert r.json()["missing_audio"] == 0
+    new_id = r.json()["id"]
+    assert sorted(statuses(client, new_id).values()) == sorted(before.values())
+    passed = next(i for i in client.get(f"/api/audio-sets/{new_id}/items").json() if i["status"] == "Đạt")
+    audio = client.get(f"/api/items/{passed['id']}/audio")
+    assert audio.status_code == 200 and audio.content
+
+
+def test_import_keeps_form_cells(client, tmp_path):
+    set_id = create_set(client, tmp_path)
+    data = export_set_zip(client, set_id)
+    new_id = import_set_zip(client, data).json()["id"]
+    cells = client.app.state.ctx.store.form_cells(new_id)
+    assert len(cells) == 3 and all(len(v) == 36 for v in cells.values())
+
+
+def test_import_rejects_non_zip_with_422(client):
+    r = import_set_zip(client, b"not a zip")
+    assert r.status_code == 422 and r.json()["detail"]
+    assert client.get("/api/audio-sets").json() == []
+
+
+def test_export_unknown_set_is_404(client):
+    r = client.post("/api/audio-sets/999/export")
+    assert r.status_code == 404 and r.json()["detail"] == "Không tìm thấy bộ audio"
+
+
+def test_import_twice_names_second_set_with_suffix(client, tmp_path):
+    set_id = create_set(client, tmp_path)
+    data = export_set_zip(client, set_id)
+    import_set_zip(client, data)
+    import_set_zip(client, data)
+    names = sorted(s["name"] for s in client.get("/api/audio-sets").json())
+    assert names == ["bộ 1", "bộ 1 (2)", "bộ 1 (3)"]
+
+
+def test_export_and_import_while_job_runs_are_409(tmp_path):
+    class SlowStt:
+        async def transcribe(self, audio, sr):
+            import asyncio
+            await asyncio.sleep(0.5)
+            return "x"
+
+    app = create_app(Settings(data_dir=tmp_path), tts=FakeTts(), stt=SlowStt(), manage_wyoming=False)
+    with TestClient(app) as c:
+        set_id = create_set(c, tmp_path)
+        assert c.post(f"/api/audio-sets/{set_id}/generate").status_code == 200
+        wait_job_end(c)
+        data = export_set_zip(c, set_id)
+        assert c.post(f"/api/audio-sets/{set_id}/verify").status_code == 200
+        assert c.post(f"/api/audio-sets/{set_id}/export").status_code == 409
+        assert import_set_zip(c, data).status_code == 409
+        assert len(c.get("/api/audio-sets").json()) == 1
+        job = c.get("/api/jobs/current").json()
+        c.post(f"/api/jobs/{job['id']}/cancel")
+        wait_job_end(c)
