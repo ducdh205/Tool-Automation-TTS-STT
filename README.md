@@ -72,6 +72,12 @@ Thanh trái có 2 bước. Nút **◐ / ☀ / ☾** ở chân thanh trái đổi
 6. **Sinh lại** (hoặc **⟳** trên từng dòng, hiện khi rê chuột) → sinh audio mới với seed khác cho câu không đạt, rồi bấm **Verify** lại.
    Khi đang chạy, thanh tiến độ và nút **Dừng** hiện dưới thanh thao tác — bấm chạy lại sẽ làm tiếp các câu chưa xong.
 7. **Xuất ▾ → Excel** (5 sheet: Tổng quan, Khối 1 – Verify, Audio không đạt, Không áp dụng, Lỗi) hoặc **CSV**.
+8. **Lưu và nạp lại bộ audio** (để lần sau test tiếp mà không sinh / verify lại): nút **⭳** ở mỗi bộ audio (hiện khi rê chuột)
+   tải về một file `.zip` gồm `manifest.json` (câu, trạng thái, WER, dữ liệu form) và thư mục `audio/*.wav`.
+   Nút **Nạp** cạnh tiêu đề *Bộ audio* nhận file zip đó và tạo một bộ **mới** (trùng tên thì thêm ` (2)`, ` (3)`…;
+   không ghi đè bộ có sẵn). Câu **Đạt** vẫn **Đạt**, dùng được ngay ở Bước 2. Câu thiếu file audio trong zip quay về **Chờ**
+   và tool báo số câu cần sinh lại. Zip không kèm kết quả test trên điện thoại (dùng **Zip phiên** của Bước 2 cho phần đó).
+   Cả hai nút bị khóa khi đang chạy job.
 
 **Cài đặt chạy** là nút tóm tắt bên phải thanh thao tác Bước 1 (vd. `Ngọc Huyền · WER ≤ 0% · 30s`). Bấm vào để sửa
 giọng VieNeu cho bộ audio mới, ngưỡng WER (%), thời gian chờ STT (giây) và ngưỡng cảnh báo tỉ lệ loại (mặc định 10%).
@@ -133,7 +139,8 @@ khi chạy lại), `reports/`, `uploads/`, `app_runs/<phiên>/` (ảnh chụp m�
 
 Nút **Xóa tất cả** cạnh tiêu đề *Bộ audio* ở thanh trái xóa toàn bộ dữ liệu output: mọi bộ audio, các lần test app,
 `audio/`, `reports/`, `uploads/`, `app_runs/`. Giữ lại `settings.json`, `profiles/`, `wyoming/` và giọng nghe thử.
-Không hoàn tác được; bị khóa khi đang chạy job.
+Không hoàn tác được; bị khóa khi đang chạy job. Muốn giữ lại một bộ audio trước khi xóa, hãy **Xuất** nó trước
+(xem Bước 1, mục 8) rồi **Nạp** lại sau.
 
 Thêm từ tương đương cho so sánh (ví dụ `SĐT` = `số điện thoại`):
 [backend/tts_stt_tool/compare/rules.json](backend/tts_stt_tool/compare/rules.json).
