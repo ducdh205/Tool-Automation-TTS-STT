@@ -224,3 +224,60 @@ def test_delete_all_audio_sets_cascades(store, set_id):
     assert store.get_items(set_id) == []
     assert store.get_app_run(run_id) is None
     assert store.delete_all_audio_sets() == 0
+
+
+def _roundtrip(store, set_id):
+    data = store.export_audio_set(set_id)
+    return store.import_audio_set(data["audio_set"], data["items"])
+
+
+def test_export_audio_set_roundtrip_keeps_state(store, set_id):
+    item = store.get_items(set_id, ItemStatus.PENDING)[0]
+    store.record_generated(item["id"], "/a/x.wav", 2)
+    store.record_verify(item["id"], "bật đèn trần", compare("bật đèn trần", "bật đèn trần"), ItemStatus.PASSED)
+
+    new_id = _roundtrip(store, set_id)
+
+    assert new_id != set_id
+    cols = ("tc_id", "status", "audio_path", "wer", "cer", "ref_text", "attempts", "ops", "enabled",
+            "skip_reason", "text_raw", "text_tts", "sheet", "region", "source_row")
+    old = [{c: i[c] for c in cols} for i in store.get_items(set_id)]
+    new = [{c: i[c] for c in cols} for i in store.get_items(new_id)]
+    assert new == old
+    assert any(i["status"] == ItemStatus.PASSED.value and i["audio_path"] == "/a/x.wav" for i in new)
+    meta = store.get_audio_set(new_id)
+    assert meta["sheets"] == ["S1"] and meta["voice"] == "Ngọc Huyền" and meta["source_file"] == "file.xlsx"
+
+
+def test_import_audio_set_makes_name_unique(store, set_id):
+    data = store.export_audio_set(set_id)
+    a = store.import_audio_set(data["audio_set"], data["items"])
+    b = store.import_audio_set(data["audio_set"], data["items"])
+    assert store.get_audio_set(a)["name"] == "bộ 1 (2)"
+    assert store.get_audio_set(b)["name"] == "bộ 1 (3)"
+    assert store.get_audio_set(set_id)["name"] == "bộ 1"
+
+
+def test_export_audio_set_keeps_form_cells(store):
+    form = [""] * 36
+    form[12] = "Bật ionizer"
+    item = _item("TC-1", "Bật ionizer")
+    item.form = form
+    sid = store.create_audio_set("f", "f.xlsx", ["S1"], "v", [item, _item("TC-2", "tắt")])
+
+    new_id = _roundtrip(store, sid)
+
+    old_cells = list(store.form_cells(sid).values())
+    new_cells = list(store.form_cells(new_id).values())
+    assert new_cells == old_cells and new_cells[0][12] == "Bật ionizer"
+
+
+def test_export_unknown_audio_set_returns_none(store):
+    assert store.export_audio_set(999) is None
+
+
+def test_import_does_not_copy_app_runs(store, set_id):
+    store.create_app_run(set_id, "SER", None, "p", None)
+    new_id = _roundtrip(store, set_id)
+    assert store.list_app_runs(new_id) == []
+    assert len(store.list_app_runs(set_id)) == 1

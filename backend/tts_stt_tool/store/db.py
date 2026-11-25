@@ -84,6 +84,12 @@ _RESULT_SELECT = (
     " FROM app_results r JOIN items i ON i.id = r.item_id"
 )
 
+_ITEM_COLUMNS = (
+    "id", "audio_set_id", "sheet", "tc_id", "turn", "feature", "priority", "region", "speaker", "expected",
+    "source_row", "text_raw", "text_tts", "skip_reason", "enabled", "status", "audio_path", "attempts",
+    "ref_text", "wer", "cer", "ops_json", "error", "updated_at", "form_json",
+)
+
 _RESET_SQL = (
     "audio_path=NULL, attempts=0, ref_text=NULL, wer=NULL, cer=NULL, ops_json=NULL, error=NULL"
 )
@@ -198,6 +204,50 @@ class Store:
         """Delete every set with its items, app runs and results (cascade); returns how many sets."""
         with self._conn() as c:
             return c.execute("DELETE FROM audio_sets").rowcount
+
+    def export_audio_set(self, audio_set_id: int) -> dict[str, Any] | None:
+        """A set's own data for a zip: set fields + raw item rows (no ids, no app runs); None if unknown."""
+        meta = self.get_audio_set(audio_set_id)
+        if meta is None:
+            return None
+        with self._conn() as c:
+            rows = c.execute("SELECT * FROM items WHERE audio_set_id=? ORDER BY id", (audio_set_id,)).fetchall()
+        items = [{k: v for k, v in dict(r).items() if k not in ("id", "audio_set_id")} for r in rows]
+        keys = ("name", "source_file", "sheets", "voice", "voice_trung", "voice_nam", "created_at")
+        return {"audio_set": {k: meta[k] for k in keys}, "items": items}
+
+    def import_audio_set(self, audio_set: dict[str, Any], items: list[dict[str, Any]]) -> int:
+        """Insert a new set from ``export_audio_set`` data; a taken name gets " (2)", " (3)"…
+
+        Rows are stored as given (no ``classify``): only known item columns are read.
+        """
+        cols = [c for c in _ITEM_COLUMNS if c not in ("id", "audio_set_id")]
+        with self._conn() as c:
+            taken = {r["name"] for r in c.execute("SELECT name FROM audio_sets")}
+            base = audio_set.get("name") or "bo-audio"
+            name, n = base, 1
+            while name in taken:
+                n += 1
+                name = f"{base} ({n})"
+            cur = c.execute(
+                "INSERT INTO audio_sets(name, source_file, sheets_json, voice, voice_trung, voice_nam, created_at)"
+                " VALUES (?,?,?,?,?,?,?)",
+                (name, audio_set.get("source_file") or "", json.dumps(audio_set.get("sheets") or [], ensure_ascii=False),
+                 audio_set.get("voice"), audio_set.get("voice_trung"), audio_set.get("voice_nam"), _now()),
+            )
+            set_id = int(cur.lastrowid)
+            now = _now()
+            rows = []
+            for it in items:
+                row = {k: it.get(k) for k in cols}
+                row["status"] = row["status"] or ItemStatus.PENDING.value
+                row["enabled"] = 1 if row["enabled"] is None else row["enabled"]
+                row["attempts"] = row["attempts"] or 0
+                row["updated_at"] = row["updated_at"] or now
+                rows.append((set_id, *(row[k] for k in cols)))
+            c.executemany(
+                f"INSERT INTO items(audio_set_id, {', '.join(cols)}) VALUES (?{',?' * len(cols)})", rows)
+            return set_id
 
     def summary(self, audio_set_id: int) -> dict[str, int]:
         with self._conn() as c:
