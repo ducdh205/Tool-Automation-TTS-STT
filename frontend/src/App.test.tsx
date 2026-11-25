@@ -14,6 +14,7 @@ afterEach(() => vi.restoreAllMocks());
 it("edits run settings from the action bar and saves WER as a ratio", async () => {
   vi.spyOn(api, "profiles").mockResolvedValue([]);
   vi.spyOn(api, "device").mockResolvedValue({ adb: false, devices: [], error: null });
+  vi.spyOn(api, "ttsDevice").mockRejectedValue(new Error("offline"));
   vi.spyOn(api, "sets").mockResolvedValue([]);
   vi.spyOn(api, "currentJob").mockResolvedValue(null);
   vi.spyOn(api, "health").mockResolvedValue({ wyoming: false, wyoming_error: null, gpu: false, job: null });
@@ -76,6 +77,7 @@ it("asks before saving settings whether to wipe the progress of existing sets", 
     created_at: "", summary: { "Chờ": 1 } });
   vi.spyOn(api, "profiles").mockResolvedValue([]);
   vi.spyOn(api, "device").mockResolvedValue({ adb: false, devices: [], error: null });
+  vi.spyOn(api, "ttsDevice").mockRejectedValue(new Error("offline"));
   const sets = vi.spyOn(api, "sets").mockResolvedValue([mk(2, "Bộ B"), mk(1, "Bộ A")]);
   vi.spyOn(api, "currentJob").mockResolvedValue(null);
   vi.spyOn(api, "health").mockResolvedValue({ wyoming: true, wyoming_error: null, gpu: true, job: null });
@@ -120,6 +122,7 @@ it("deletes the open audio set and opens the next one", async () => {
     created_at: "", summary: { "Chờ": 1 } });
   vi.spyOn(api, "profiles").mockResolvedValue([]);
   vi.spyOn(api, "device").mockResolvedValue({ adb: false, devices: [], error: null });
+  vi.spyOn(api, "ttsDevice").mockRejectedValue(new Error("offline"));
   const sets = vi.spyOn(api, "sets").mockResolvedValue([mk(2, "Bộ B"), mk(1, "Bộ A")]);
   vi.spyOn(api, "currentJob").mockResolvedValue(null);
   vi.spyOn(api, "health").mockResolvedValue({ wyoming: true, wyoming_error: null, gpu: true, job: null });
@@ -144,6 +147,7 @@ it("clears all data and leaves no set open", async () => {
     created_at: "", summary: { "Chờ": 1 } });
   vi.spyOn(api, "profiles").mockResolvedValue([]);
   vi.spyOn(api, "device").mockResolvedValue({ adb: false, devices: [], error: null });
+  vi.spyOn(api, "ttsDevice").mockRejectedValue(new Error("offline"));
   const sets = vi.spyOn(api, "sets").mockResolvedValue([mk(2, "Bộ B"), mk(1, "Bộ A")]);
   vi.spyOn(api, "currentJob").mockResolvedValue(null);
   vi.spyOn(api, "health").mockResolvedValue({ wyoming: true, wyoming_error: null, gpu: true, job: null });

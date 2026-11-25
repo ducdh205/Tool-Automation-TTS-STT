@@ -47,6 +47,13 @@ export type DeviceInputBody =
   | { action: "key"; key: DeviceKey }
   | { action: "text"; text: string };
 export interface DeviceStatus { adb: boolean; error: string | null; devices: DeviceInfo[]; busy?: string | null }
+export type TtsDeviceKind = "cpu" | "cuda";
+export interface CudaInstall { state: "idle" | "running" | "done" | "failed"; log_tail: string[]; error: string | null }
+/** GET /api/tts/device: chosen and loaded TTS device, NVIDIA / PyTorch CUDA probe, installer state. */
+export interface TtsDevice {
+  device: TtsDeviceKind; active: TtsDeviceKind | null; load_error: string | null;
+  nvidia: boolean; gpu_name: string | null; torch_cuda: boolean; uv: boolean; install: CudaInstall;
+}
 
 export interface ProgressEvent {
   job_id: string; kind: "item" | "progress" | "log" | "done" | "error" | "cancelled";
@@ -132,6 +139,9 @@ export const api = {
   voicePreviewUrl: (id: string, speed = 1) =>
     `/api/voices/preview?voice_id=${encodeURIComponent(id)}${speed === 1 ? "" : `&speed=${speed}`}`,
   health: () => req<Health>("GET", "/api/health"),
+  ttsDevice: () => req<TtsDevice>("GET", "/api/tts/device"),
+  setTtsDevice: (device: TtsDeviceKind) => req<TtsDevice>("PUT", "/api/tts/device", { device }),
+  installCuda: () => req<TtsDevice>("POST", "/api/tts/install-cuda"),
   profiles: () => req<AppProfile[]>("GET", "/api/profiles"),
   saveProfile: (p: AppProfile) => req<AppProfile>("PUT", `/api/profiles/${encodeURIComponent(p.name)}`, p),
   appRuns: (setId: number) => req<AppRun[]>("GET", `/api/audio-sets/${setId}/app-runs`),
