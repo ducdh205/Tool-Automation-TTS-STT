@@ -119,7 +119,7 @@ def build_form_report(store: Store, run_id: int, out_path: Path) -> Path:
     run = store.get_app_run(run_id) or {"id": run_id}
     audio_set = store.get_audio_set(run.get("audio_set_id")) or {}
     results = store.app_results(run_id)
-    cells = store.form_cells(audio_set.get("id")) if audio_set else {}
+    cells: dict[int, list[str]] = {}  # the 36-column form is no longer kept; removed in Task 4
     folders = case_folders(results)
 
     wb = Workbook()

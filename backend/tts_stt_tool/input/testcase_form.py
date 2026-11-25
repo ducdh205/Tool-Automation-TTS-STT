@@ -1,4 +1,4 @@
-"""Shared Excel helpers: cell text and workbook opening (the 36-column form is mapped like any other file)."""
+"""Shared Excel helpers: cell text and workbook opening."""
 
 from __future__ import annotations
 
@@ -9,10 +9,6 @@ from typing import Any
 
 import openpyxl
 from openpyxl.utils.escape import unescape
-
-ID_HEADER = "TC_ID"
-TEXT_HEADER = "Câu nói (utterance)"
-FORM_COLS = 36  # A..AJ
 
 
 class InputError(Exception):

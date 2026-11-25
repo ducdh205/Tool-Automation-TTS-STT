@@ -9,14 +9,7 @@ from pathlib import Path
 
 from openpyxl.utils import get_column_letter
 
-from tts_stt_tool.input.testcase_form import (
-    FORM_COLS,
-    ID_HEADER,
-    TEXT_HEADER,
-    InputError,
-    cell_text,
-    open_workbook,
-)
+from tts_stt_tool.input.testcase_form import InputError, cell_text, open_workbook
 from tts_stt_tool.models import InputItem
 
 DEFAULT_SPEAKER = "👤 Người dùng"
@@ -159,28 +152,23 @@ def read_items(path: Path, sheets: list[str], mapping: ColumnMapping) -> list[In
         r_idx = _col_index(labels, mapping.region_col, sheet_name)
         e_idx = _col_index(labels, mapping.expected_col, sheet_name)
         n_idx = _col_index(labels, mapping.turn_col, sheet_name)
-        is_form = len(labels) > 12 and labels[0] == ID_HEADER and labels[12] == TEXT_HEADER
-        width = max(len(labels), FORM_COLS if is_form else 0)
+        width = len(labels)
         for n, cells in data:
             cells = (cells + [""] * width)[:width]
             if i_idx is not None and not cells[i_idx]:
                 continue
-            kw: dict = {}
-            if is_form:
-                kw = {"form": cells[:FORM_COLS], "feature": cells[1], "priority": cells[4]}
             items.append(
                 InputItem(
                     sheet=sheet_name,
                     tc_id=cells[i_idx] if i_idx is not None else str(n),
                     turn=(cells[n_idx] if n_idx is not None else "") or "1",
-                    feature=kw.get("feature", ""),
-                    priority=kw.get("priority", ""),
+                    feature="",
+                    priority="",
                     region=cells[r_idx] if r_idx is not None else (mapping.region_value or ""),
-                    speaker=(cells[11] or DEFAULT_SPEAKER) if is_form else DEFAULT_SPEAKER,
+                    speaker=DEFAULT_SPEAKER,
                     text_raw=cells[t_idx],
                     expected=cells[e_idx] if e_idx is not None else "",
                     source_row=n,
-                    form=kw.get("form", []),
                 )
             )
     return items

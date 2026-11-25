@@ -1,4 +1,4 @@
-"""An app run with one result of each kind, shared by the form-export and session-zip tests."""
+"""An app run with one result of each kind, shared by the result-export and session-zip tests."""
 
 from types import SimpleNamespace
 
@@ -12,26 +12,19 @@ from tts_stt_tool.store.db import AppStatus, ItemStatus, Store
 SHEET = "Ionizer via voice command"
 
 
-def form_row(tc, turn, text, note=""):
-    cells = [""] * 36
-    cells[0], cells[1], cells[2], cells[4], cells[7] = tc, "Bật ionizer", "UC_01", "P0 - Smoke", "BAC-HN"
-    cells[8], cells[11], cells[12], cells[13], cells[27] = turn, "👤 Người dùng", text, "Ionizer bật", note
-    return cells
-
-
-def input_item(tc, turn, text, row, note="", form=True):
+def input_item(tc, turn, text, row):
     return InputItem(sheet=SHEET, tc_id=tc, turn=turn, feature="Bật ionizer", priority="P0 - Smoke",
                      region="BAC-HN", speaker="👤 Người dùng", text_raw=text, expected="Ionizer bật",
-                     source_row=row, form=form_row(tc, turn, text, note) if form else [])
+                     source_row=row)
 
 
-def make_session(tmp_path, *, form=True):
+def make_session(tmp_path):
     store = Store(tmp_path / "t.db")
     settings = Settings(data_dir=tmp_path)
     items = [
-        input_item("TC1", "1", "Bật ionizer", 5, form=form),
-        input_item("TC2", "1", "Hey Vita, mở cửa sổ", 6, note="ghi chú gốc", form=form),
-        input_item("TC3", "1", "Tắt đèn", 7, form=form),
+        input_item("TC1", "1", "Bật ionizer", 5),
+        input_item("TC2", "1", "Hey Vita, mở cửa sổ", 6),
+        input_item("TC3", "1", "Tắt đèn", 7),
     ]
     set_id = store.create_audio_set("Bộ điều khiển", "DieuKhienXe_Pre.xlsx", [SHEET], "Ngọc Huyền", items)
     audio = tmp_path / "audio"

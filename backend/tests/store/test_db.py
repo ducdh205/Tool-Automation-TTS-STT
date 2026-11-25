@@ -151,19 +151,6 @@ def test_record_generated_clears_verify(store, staged):
     assert it["attempts"] == 2
 
 
-def test_form_cells_kept_but_not_in_payload(store):
-    form = [""] * 36
-    form[12] = "Bật ionizer"
-    item = _item("TC-1", "Bật ionizer")
-    item.form = form
-    set_id = store.create_audio_set("f", "f.xlsx", ["S1"], "v", [item, _item("TC-2", "tắt")])
-    first, second = (i["id"] for i in store.get_items(set_id))
-    cells = store.form_cells(set_id)
-    assert cells[first][12] == "Bật ionizer"
-    assert second not in cells
-    assert "form_json" not in store.get_item(first) and "form" not in store.get_item(first)
-
-
 def test_migrates_old_schema(tmp_path):
     import sqlite3
 

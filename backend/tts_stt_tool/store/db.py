@@ -116,7 +116,7 @@ def _now() -> str:
 def _item_row(row: sqlite3.Row) -> dict[str, Any]:
     d = dict(row)
     d["ops"] = json.loads(d.pop("ops_json")) if d.get("ops_json") else []
-    d.pop("form_json", None)  # up to 36 cells per row: only the form export reads it (Store.form_cells)
+    d.pop("form_json", None)  # legacy column of the old 36-column form export, no longer read
     # an app result carries its item's Block 1 status as item_status; an item row has it as status
     d["verify"] = verify_status(d.pop("item_status") if "item_status" in d else d.get("status"))
     return d
@@ -172,12 +172,11 @@ class Store:
                     set_id, it.sheet, it.tc_id, it.turn, it.feature, it.priority, it.region,
                     it.speaker, it.expected, it.source_row, it.text_raw, text_tts, reason,
                     0 if reason else 1, status.value, _now(),
-                    json.dumps(it.form, ensure_ascii=False) if it.form else None,
                 ))
             c.executemany(
                 "INSERT INTO items(audio_set_id, sheet, tc_id, turn, feature, priority, region, speaker,"
-                " expected, source_row, text_raw, text_tts, skip_reason, enabled, status, updated_at, form_json)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                " expected, source_row, text_raw, text_tts, skip_reason, enabled, status, updated_at)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 rows,
             )
             return set_id
@@ -265,14 +264,6 @@ class Store:
         with self._conn() as c:
             r = c.execute("SELECT * FROM items WHERE id=?", (item_id,)).fetchone()
         return _item_row(r) if r else None
-
-    def form_cells(self, audio_set_id: int) -> dict[int, list[str]]:
-        """Item id -> the 36 cells of its testcase-form row (items read from other inputs are absent)."""
-        with self._conn() as c:
-            rows = c.execute(
-                "SELECT id, form_json FROM items WHERE audio_set_id=? AND form_json IS NOT NULL", (audio_set_id,)
-            ).fetchall()
-        return {r["id"]: json.loads(r["form_json"]) for r in rows}
 
     def _select_items(self, audio_set_id: int, item_ids: list[int] | None, where: str,
                       args: tuple[Any, ...] = ()) -> list[dict[str, Any]]:

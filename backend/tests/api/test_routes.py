@@ -109,12 +109,6 @@ def test_create_set_rejects_region_conflict_and_missing_sheets(client, tmp_path)
     assert r.status_code == 422
 
 
-def test_create_set_keeps_form_cells(client, tmp_path):
-    set_id = create_set(client, tmp_path)
-    cells = client.app.state.ctx.store.form_cells(set_id)
-    assert len(cells) == 3 and all(len(v) == 36 for v in cells.values())
-
-
 def test_voice_preview_caches_a_wav_for_the_selected_preset(client, monkeypatch):
     ctx = client.app.state.ctx
     tts = ctx.tts
