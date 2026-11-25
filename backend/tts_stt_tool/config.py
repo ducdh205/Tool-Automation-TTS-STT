@@ -27,6 +27,7 @@ class Settings:
     # Empty = start vendor/wyoming-vietnamese via the Windows launcher (see stt/server_manager.py).
     wyoming_cmd: list[str] = field(default_factory=list)
     port: int = 8765
+    tts_device: str = "cpu"  # "cpu" | "cuda" — VieNeu backend, switched from the test bench panel
 
     def to_json(self) -> dict:
         d = asdict(self)

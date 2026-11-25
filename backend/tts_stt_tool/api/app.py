@@ -105,7 +105,7 @@ def create_app(
     if tts is None:
         from tts_stt_tool.tts.vieneu_engine import VieneuEngine
 
-        tts = VieneuEngine()
+        tts = VieneuEngine(device=settings.tts_device)
     ctx = AppContext(
         settings=settings,
         store=Store(settings.data_dir / "tool.db"),

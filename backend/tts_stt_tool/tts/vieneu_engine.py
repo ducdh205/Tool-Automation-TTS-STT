@@ -16,17 +16,37 @@ SAMPLE_RATE = 48000
 class VieneuEngine:
     version = "vieneu-v3turbo"
 
-    def __init__(self, mode: str = "v3turbo") -> None:
+    def __init__(self, mode: str = "v3turbo", device: str = "cpu") -> None:
         self._mode = mode
+        self._device = device
         self._tts: Any = None
         self._lock = threading.Lock()
+        self.active_device: str | None = None  # what the loaded model runs on (None = not loaded yet)
+        self.load_error: str | None = None  # why CUDA could not be used, when it fell back to CPU
+
+    def set_device(self, device: str) -> None:
+        """Switch CPU/CUDA: drop the loaded model so the next call reloads it."""
+        with self._lock:
+            self._device = device
+            self._tts = None
+            self.active_device = None
+            self.load_error = None
 
     def _model(self) -> Any:
         with self._lock:
             if self._tts is None:
                 from vieneu import Vieneu  # heavy import, load lazily
 
-                self._tts = Vieneu(mode=self._mode)
+                device = self._device
+                if device == "cuda":
+                    try:
+                        self._tts = Vieneu(mode=self._mode, device="cuda")
+                    except Exception as e:  # torch/driver missing: keep working on CPU
+                        self.load_error = str(e)
+                        device = "cpu"
+                if self._tts is None:
+                    self._tts = Vieneu(mode=self._mode, device=device)
+                self.active_device = device
             return self._tts
 
     @staticmethod
