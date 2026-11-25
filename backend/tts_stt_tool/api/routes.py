@@ -440,6 +440,68 @@ async def voice_preview(request: Request, voice_id: str,
     return FileResponse(path, media_type="audio/wav")
 
 
+# -- TTS device (CPU / GPU) ----------------------------------------------------
+async def _tts_device_json(ctx: AppContext, refresh: bool = False) -> dict[str, Any]:
+    probe = await ctx.gpu.probe(refresh=refresh)
+    return {
+        "device": ctx.settings.tts_device,
+        "active": getattr(ctx.tts, "active_device", None),
+        "load_error": getattr(ctx.tts, "load_error", None),
+        "nvidia": probe.nvidia,
+        "gpu_name": probe.gpu_name,
+        "torch_cuda": probe.torch_cuda,
+        "uv": ctx.gpu.can_install,
+        "install": ctx.gpu.install_state(),
+    }
+
+
+def _apply_tts_device(ctx: AppContext, device: str) -> None:
+    ctx.settings.tts_device = device
+    save_settings(ctx.settings)
+    set_device = getattr(ctx.tts, "set_device", None)
+    if set_device is not None:
+        set_device(device)
+
+
+@router.get("/tts/device")
+async def get_tts_device(request: Request) -> dict[str, Any]:
+    return await _tts_device_json(ctx_of(request))
+
+
+class TtsDeviceIn(BaseModel):
+    device: Literal["cpu", "cuda"]
+
+
+@router.put("/tts/device")
+async def put_tts_device(request: Request, body: TtsDeviceIn) -> dict[str, Any]:
+    ctx = ctx_of(request)
+    if ctx.runner.current() is not None:  # the model is reloaded on switch; never under a running job
+        raise HTTPException(409, "Đang có tác vụ chạy, đợi xong rồi đổi")
+    if body.device == "cuda":
+        probe = await ctx.gpu.probe(refresh=True)  # CUDA may have been installed by hand meanwhile
+        if not probe.nvidia:
+            raise HTTPException(409, "Máy không có GPU NVIDIA")
+        if not probe.torch_cuda:
+            raise HTTPException(409, "Chưa có PyTorch CUDA")
+    if body.device != ctx.settings.tts_device:
+        _apply_tts_device(ctx, body.device)
+    return await _tts_device_json(ctx)
+
+
+@router.post("/tts/install-cuda")
+async def install_cuda(request: Request) -> dict[str, Any]:
+    ctx = ctx_of(request)
+    if not (await ctx.gpu.probe()).nvidia:
+        raise HTTPException(400, "Máy không có GPU NVIDIA")
+
+    def on_done() -> None:
+        if ctx.runner.current() is None:  # else the user switches once the job ends
+            _apply_tts_device(ctx, "cuda")
+
+    ctx.gpu.start_install(on_done)
+    return await _tts_device_json(ctx)
+
+
 def _gpu_available() -> bool:
     try:
         import torch  # optional

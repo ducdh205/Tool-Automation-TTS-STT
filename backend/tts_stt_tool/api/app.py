@@ -21,6 +21,7 @@ from tts_stt_tool.stt.server_manager import REPO_ROOT, WyomingServerManager, def
 from tts_stt_tool.stt.wyoming_client import SttEngine, WyomingStt
 from tts_stt_tool.tts.base import TtsEngine, VoiceInfo
 from tts_stt_tool.tts.cache import AudioCache
+from tts_stt_tool.tts.gpu import GpuSetup
 
 _LOG = logging.getLogger(__name__)
 FRONTEND_DIST = REPO_ROOT / "frontend" / "dist"
@@ -44,6 +45,7 @@ class AppContext:
     device_factory: Callable[[str], Awaitable[Any]] | None = None  # serial -> DeviceDriver
     player: Any = None  # AudioPlayer
     busy_serial: str | None = None  # phone driven by a running block 2 job
+    gpu: GpuSetup = field(default_factory=GpuSetup)  # NVIDIA / torch CUDA checks + installer
     exports: dict[str, tuple[Path, str]] = field(default_factory=dict)  # one-time token -> (zip, download name)
 
     @property
@@ -98,6 +100,7 @@ def create_app(
     manage_wyoming: bool = True,
     device_factory: Callable[[str], Awaitable[Any]] | None = None,
     player: Any = None,
+    gpu: GpuSetup | None = None,
 ) -> FastAPI:
     from tts_stt_tool.api.routes import router
     from tts_stt_tool.api.ws import ws_router
@@ -117,6 +120,7 @@ def create_app(
         wyoming=_wyoming_manager(settings) if manage_wyoming else None,
         device_factory=device_factory,
         player=player,
+        gpu=gpu or GpuSetup(),
     )
     if ctx.player is None:
         from tts_stt_tool.device.player import WinSoundPlayer
