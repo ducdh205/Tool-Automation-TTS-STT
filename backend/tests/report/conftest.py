@@ -2,7 +2,9 @@
 
 from types import SimpleNamespace
 
+import openpyxl
 import pytest
+from openpyxl.styles import Font, PatternFill
 
 from tts_stt_tool.compare.score import compare
 from tts_stt_tool.config import Settings
@@ -10,6 +12,29 @@ from tts_stt_tool.models import InputItem
 from tts_stt_tool.store.db import AppStatus, ItemStatus, Store
 
 SHEET = "Ionizer via voice command"
+DROPPED = "Sheet bỏ"
+HEADER_FILL = "FFFFF2CC"
+
+
+def write_source(path, sheets=(SHEET, DROPPED)):
+    """A tester's file: title merged over A1:C1, styled header on row 4, data rows 5-8 (row 8 never tested)."""
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+    for name in sheets:
+        ws = wb.create_sheet(name)
+        ws["A1"] = "Kịch bản ionizer"
+        ws.merge_cells("A1:C1")
+        for col, h in zip("ABC", ("TC_ID", "Lượt", "Câu nói")):
+            ws[f"{col}4"] = h
+            ws[f"{col}4"].font = Font(bold=True)
+            ws[f"{col}4"].fill = PatternFill("solid", fgColor=HEADER_FILL)
+        for row, (tc, text) in enumerate((("TC1", "Bật ionizer"), ("TC2", "Hey Vita, mở cửa sổ"),
+                                          ("TC3", "Tắt đèn"), ("TC4", "Câu không test")), start=5):
+            ws[f"A{row}"], ws[f"B{row}"], ws[f"C{row}"] = tc, 1, text
+        ws.column_dimensions["C"].width = 33
+        ws.auto_filter.ref = "A4:C8"
+    wb.save(path)
+    return path
 
 
 def input_item(tc, turn, text, row):
@@ -18,7 +43,7 @@ def input_item(tc, turn, text, row):
                      source_row=row)
 
 
-def make_session(tmp_path):
+def make_session(tmp_path, *, source=True):
     store = Store(tmp_path / "t.db")
     settings = Settings(data_dir=tmp_path)
     items = [
@@ -27,6 +52,8 @@ def make_session(tmp_path):
         input_item("TC3", "1", "Tắt đèn", 7),
     ]
     set_id = store.create_audio_set("Bộ điều khiển", "DieuKhienXe_Pre.xlsx", [SHEET], "Ngọc Huyền", items)
+    if source:
+        store.set_source(set_id, str(write_source(tmp_path / "src.xlsx")), 4)
     audio = tmp_path / "audio"
     audio.mkdir()
     for it in store.get_items(set_id):
