@@ -149,7 +149,7 @@ vendor\go-ios\ios.exe forward 8100 8100
 ```
 
 Tool tự nhận iPhone (qua go-ios) — bảng Thiết bị báo *Chưa chạy WebDriverAgent* nếu bước 2–3 chưa chạy.
-Cùng hồ sơ app (bundle id = package). Khác Android: tool chờ nút "Dừng nghe" hiện ra thay cho `dumpsys audio`,
+Cùng hồ sơ app (bundle id = package; có sẵn *Vita Work (dev)* và *Vita Work (UAT)* `com.vita.suite.stg`). Khác Android: tool chờ nút "Dừng nghe" hiện ra thay cho `dumpsys audio`,
 "Back" = chạm "Đóng" (không có thì vuốt từ mép trái), gõ được chữ có dấu; không có phím Đa nhiệm / Nguồn.
 Một WebDriverAgent (cổng 8100) điều khiển một iPhone; đổi cổng: `wda_url` trong `data/settings.json`.
 

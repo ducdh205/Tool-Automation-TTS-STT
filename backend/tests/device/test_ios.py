@@ -159,3 +159,10 @@ def test_goios_parse_app_version():
 def test_goios_last_json_without_answer():
     with pytest.raises(GoIosError):
         last_json('{"level":"WARN","msg":"x"}\n')
+
+
+async def test_back_on_task_form_taps_close():
+    fake = FakeWda([xml("ios_uat_form.xml")])
+    d = IosDriver(client(fake), 393, 852)
+    await d.back()
+    assert fake.calls[-1] == ("POST", "/session/S1/wda/tap", {"x": 365, "y": 99})

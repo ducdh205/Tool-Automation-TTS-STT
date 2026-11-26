@@ -62,3 +62,28 @@ def test_invisible_nodes_are_dropped():
            'width="393" height="852"><XCUIElementTypeButton type="XCUIElementTypeButton" name="Đóng" label="Đóng" '
            'visible="false" x="300" y="500" width="40" height="40"/></XCUIElementTypeApplication>')
     assert parse_wda_source(xml) == []
+
+
+# --- Vita Work UAT (com.vita.suite.stg): the task form opened by speaking ----
+def test_uat_home_has_mic():
+    assert find(load("ios_uat_home.xml"), "Nói để tạo việc") is not None
+
+
+def test_uat_task_form_heard_text():
+    from tts_stt_tool.device.ui_tree import heard_text
+
+    nodes = load("ios_uat_form.xml")
+    assert heard_text(nodes, "Bạn nói: ") == "Chức năng hóa không khí"
+    assert find(nodes, "Đóng") is not None and find(nodes, "Bấm để nói") is not None
+
+
+def test_uat_discard_dialog():
+    nodes = load("ios_uat_discard.xml")
+    assert find(nodes, "Bỏ thay đổi?") is not None
+    assert find(nodes, "Bỏ thay đổi").clickable
+    assert find(nodes, "Giữ nháp") is not None
+
+
+def test_uat_not_a_task_reply_is_not_a_bubble():
+    # "Câu này chưa phải một việc cần làm…" is the app's (left-aligned) answer
+    assert bubble_labels(load("ios_uat_not_task.xml"), W) == ["Mở"]

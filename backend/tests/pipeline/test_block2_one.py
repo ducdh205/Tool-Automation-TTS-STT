@@ -297,3 +297,44 @@ async def test_ios_stop_button_never_shows():
     with pytest.raises(OperationError, match="[Mm]ic"):
         await one(app)
     assert app.played == []
+
+
+class FakeIosUatApp(FakeIosApp):
+    """Vita UAT on iOS: the heard sentence shows as a chat bubble first, then the task form
+    replaces it after ``form_after_dumps`` dumps (the real app: ~1 s)."""
+
+    def __init__(self, *a, form_after_dumps: int = 2, **kw):
+        super().__init__(*a, **kw)
+        self.form_after_dumps = form_after_dumps
+        self.bubble_dumps = 0
+
+    async def nodes(self):
+        if self.state == "idle" and self.bubbles and self.form_after_dumps is not None:
+            self.bubble_dumps += 1
+            if self.bubble_dumps > self.form_after_dumps:
+                self.state, self.heard, self.bubbles = "heard_form", self.bubbles[-1], []
+        return await super().nodes()
+
+    async def back(self):
+        if self.state == "idle" and self.bubbles and self.form_after_dumps is not None:
+            # closing the chat does not stop the form: it opens on the home screen
+            self.taps.append("BACK")
+            self.state, self.heard, self.bubbles = "heard_form", self.bubbles[-1], []
+            return
+        await super().back()
+
+
+async def test_ios_form_after_bubble_is_discarded():
+    app = FakeIosUatApp(live_after_dumps=1, form_after_dumps=2)
+    cap = await one(app)
+    assert cap.text == "chỉnh nhiệt độ ghế lái lên 24 độ"
+    assert app.state == "home"  # the late form was closed with "Bỏ thay đổi", nothing left over
+    assert app.taps[-2:] == ["BACK", "Bỏ thay đổi"]
+    assert app.drafts == 0
+
+
+async def test_ios_bubble_without_form_waits_briefly_only():
+    app = FakeIosUatApp(live_after_dumps=1, form_after_dumps=None)  # "not a task": no form
+    cap = await one(app)
+    assert cap.text == "chỉnh nhiệt độ ghế lái lên 24 độ"
+    assert app.taps[-1] == "BACK" and app.state == "home"

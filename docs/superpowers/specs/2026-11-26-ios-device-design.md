@@ -29,8 +29,18 @@ trạng thái ("Chưa chạy WebDriverAgent"). Tự quản lý WDA là bước s
 | Dump ngay sau khi tạo session có thể báo sai hướng xoay | Driver dump lại khi khung app không khớp kích thước cửa sổ |
 | Không có phím Back | `back()` = chạm "Đóng"/"Quay lại"/… trên dump mới; không có thì vuốt từ mép trái |
 
-Chưa thấy form "Bạn nói: …" và hộp thoại "Bỏ thay đổi?" trên iOS (máy chủ app báo lỗi lúc khảo sát);
-luồng đọc `heard_prefix` / `discard_label` dùng nguyên như Android, cần kiểm lại khi máy chủ chạy.
+### Vita Work UAT (`com.vita.suite.stg`, build 18) — form tạo việc
+
+- Câu là một việc: **bong bóng chat hiện trước (~0,5 s sau khi dừng), ~1 s sau form "Bạn nói: “…”" thay thế**
+  (cùng chữ). Đóng chat sớm thì form vẫn mở lên màn hình chính ⇒ trên driver `fast_ui`, sau khi thấy bong
+  bóng tool chờ thêm tối đa `FORM_WAIT_S` = 2,5 s; có form thì lấy chữ ở form, đóng bằng "Đóng" → "Bỏ thay đổi".
+- Câu không phải việc: bong bóng + câu trả lời canh trái "Câu này chưa phải một việc cần làm…" (không có form).
+- Hộp thoại "Bỏ thay đổi?": "Giữ nháp" / "Bỏ thay đổi" / "Tiếp tục chỉnh sửa" — như Android.
+- Hồ sơ dựng sẵn **Vita Work (UAT)** (nhãn như bản dev).
+
+Đo thử (loa PC → iPhone 15, 26/11): "Nhắc tôi gọi điện cho khách hàng lúc ba giờ chiều mai" → đúng;
+cùng một câu, giọng Ngọc Huyền app không nghe ra gì còn giọng Quang Sơn đúng hết — giọng đọc ảnh hưởng
+rõ tới kết quả của app. ~10 s/câu.
 
 ## Thành phần
 

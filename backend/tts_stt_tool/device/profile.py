@@ -35,6 +35,9 @@ class AppProfile:
 
 
 DEFAULT_PROFILE = AppProfile()
+# Same screens and labels, other build (Android and iPhone use the same package / bundle id).
+UAT_PROFILE = AppProfile(name="Vita Work (UAT)", package="com.vita.suite.stg")
+BUILTIN_PROFILES = (DEFAULT_PROFILE, UAT_PROFILE)
 _FIELDS = {f.name for f in fields(AppProfile)}
 
 
@@ -47,7 +50,7 @@ def from_dict(d: dict) -> AppProfile:
 
 
 def list_profiles(directory: Path) -> list[AppProfile]:
-    found: dict[str, AppProfile] = {DEFAULT_PROFILE.name: AppProfile()}
+    found: dict[str, AppProfile] = {p.name: from_dict(p.to_json()) for p in BUILTIN_PROFILES}
     if directory.is_dir():
         for f in sorted(directory.glob("*.json")):
             try:

@@ -2,7 +2,10 @@ import json
 
 import pytest
 
-from tts_stt_tool.device.profile import DEFAULT_PROFILE, AppProfile, get_profile, list_profiles, save_profile
+from tts_stt_tool.device.profile import (DEFAULT_PROFILE, UAT_PROFILE, AppProfile, get_profile, list_profiles,
+                                        save_profile)
+
+BUILTIN = [DEFAULT_PROFILE.name, UAT_PROFILE.name]
 
 
 def test_default_profile_values():
@@ -16,20 +19,23 @@ def test_default_profile_values():
     assert p.heard_prefix == "Bạn nói: "
 
 
-def test_default_listed_when_empty(tmp_path):
-    assert [p.name for p in list_profiles(tmp_path)] == [DEFAULT_PROFILE.name]
+def test_builtin_profiles_listed_when_empty(tmp_path):
+    assert [p.name for p in list_profiles(tmp_path)] == BUILTIN
+    uat = get_profile(tmp_path, "Vita Work (UAT)")
+    assert uat.package == "com.vita.suite.stg"
+    assert (uat.open_label, uat.heard_prefix, uat.discard_label) == ("Nói để tạo việc", "Bạn nói: ", "Bỏ thay đổi")
 
 
 def test_save_and_get(tmp_path):
     save_profile(tmp_path, AppProfile(name="App B", package="com.b", open_label="Mic"))
     assert get_profile(tmp_path, "App B").open_label == "Mic"
-    assert {p.name for p in list_profiles(tmp_path)} == {"App B", DEFAULT_PROFILE.name}
+    assert {p.name for p in list_profiles(tmp_path)} == {"App B", *BUILTIN}
 
 
 def test_saved_default_overrides(tmp_path):
     save_profile(tmp_path, AppProfile(post_delay_s=2.0))
     assert get_profile(tmp_path, DEFAULT_PROFILE.name).post_delay_s == 2.0
-    assert len(list_profiles(tmp_path)) == 1
+    assert len(list_profiles(tmp_path)) == len(BUILTIN)
 
 
 def test_corrupt_and_unknown_keys(tmp_path):

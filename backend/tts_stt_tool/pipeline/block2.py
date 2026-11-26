@@ -183,6 +183,7 @@ def _sheet_open(nodes: list[UiNode], p: AppProfile) -> bool:
 
 
 DISCARD_WAIT_S = 3.0
+FORM_WAIT_S = 2.5  # iOS: how long a chat bubble may wait for the task form that follows it
 
 
 async def _discard_form(dev: DeviceDriver, p: AppProfile, log: list[str], sleep: Sleep) -> None:
@@ -273,6 +274,18 @@ async def _run_one(dev: DeviceDriver, p: AppProfile, wav: Path, player: AudioPla
             break
     else:
         log.append("App không trả câu nào")
+
+    if text is not None and not on_form and p.heard_prefix and getattr(dev, "fast_ui", False):
+        # iOS (Vita UAT): the bubble shows first and the task form replaces it ~1 s later.
+        # Closing the chat before that leaves the form open on the home screen, so wait for it.
+        async for later in _poll(dev, FORM_WAIT_S, sleep):
+            heard = heard_text(later, p.heard_prefix)
+            if heard is not None and heard != before_heard:
+                text, on_form, nodes = heard, True, later
+                log.append(f"Mở form tạo việc: {text}")
+                break
+            if not _sheet_open(later, p):
+                break
 
     bubbles = bubble_labels(nodes, dev.screen_w)
     shot = None
