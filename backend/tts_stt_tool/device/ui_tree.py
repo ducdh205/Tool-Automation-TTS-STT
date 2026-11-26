@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 
 _BOUNDS = re.compile(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]")
 _EDIT = "android.widget.EditText"
 _NOT_BUBBLE = ("android.widget.Button", _EDIT, "android.widget.ImageView")
+# Input character counter ("Còn lại 1.000 ký tự"). The 2026-11 listening sheet has no EditText,
+# so the counter cannot be ruled out by sitting inside the input box.
+_COUNTER = re.compile(r"^Còn lại [\d.,]+ ký tự$")
 
 
 @dataclass
@@ -36,11 +40,17 @@ class UiNode:
         return {"label": self.label, "cls": self.cls, "bounds": list(self.bounds), "clickable": self.clickable}
 
 
+def _nfc(s: str) -> str:
+    return unicodedata.normalize("NFC", s)
+
+
 def parse_dump(xml: str) -> list[UiNode]:
     root = ET.fromstring(xml[xml.index("<"):])
     out: list[UiNode] = []
     for el in root.iter("node"):
-        text, desc, cls = el.get("text", ""), el.get("content-desc", ""), el.get("class", "")
+        # The app mixes decomposed marks ("o" + U+0300) into its labels: compare everything as NFC.
+        text, desc = _nfc(el.get("text", "")), _nfc(el.get("content-desc", ""))
+        cls = el.get("class", "")
         if not (text or desc or cls == _EDIT):
             continue
         m = _BOUNDS.match(el.get("bounds", ""))
@@ -56,12 +66,30 @@ def find(nodes: list[UiNode], label: str) -> UiNode | None:
 
     A plain prefix is not enough: "Đóng" must not match a task card "Đóng cửa sổ…".
     """
+    label = _nfc(label)
     for n in nodes:
         if n.label == label:
             return n
     for n in nodes:
         if n.label.split("\n", 1)[0] == label:
             return n
+    return None
+
+
+_QUOTES = "“”\"'"
+
+
+def heard_text(nodes: list[UiNode], prefix: str) -> str | None:
+    """What the app heard, from the task form line ``Bạn nói: “…”`` (quotes removed).
+
+    None when ``prefix`` is empty, no node starts with it, or the quoted text is empty.
+    """
+    if not prefix:
+        return None
+    want = _nfc(prefix)
+    for n in nodes:
+        if n.label.startswith(want):
+            return n.label[len(want):].strip().strip(_QUOTES).strip() or None
     return None
 
 
@@ -82,6 +110,7 @@ def right_bubbles(nodes: list[UiNode], screen_w: int) -> list[UiNode]:
     out = [
         n for n in nodes
         if n.label and n.cls not in _NOT_BUBBLE and n.bounds[3] <= limit
+        and not _COUNTER.match(n.label)
         and n.bounds[0] > screen_w * 0.1 and n.bounds[2] > screen_w * 0.75
     ]
     return sorted(out, key=lambda n: n.bounds[1])

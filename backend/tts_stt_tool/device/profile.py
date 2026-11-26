@@ -20,7 +20,10 @@ class AppProfile:
     idle_label: str = "Bấm để nói"  # mic button when not listening
     close_label: str = "Đóng"  # closes the voice sheet
     sheet_label: str = "Tạo việc"
-    discard_label: str = "Bỏ"  # "Ở lại / Bỏ" dialog when backing out of a task form
+    discard_label: str = "Bỏ thay đổi"  # "Bỏ thay đổi?" dialog when backing out of a task form
+    # Speaking opens a task form whose line "Bạn nói: “…”" holds what the app heard.
+    # Empty = read the heard sentence from the chat bubbles only.
+    heard_prefix: str = "Bạn nói: "
     pre_delay_s: float = 0.3  # after the mic is live
     post_delay_s: float = 1.0
     listen_timeout_s: float = 6.0

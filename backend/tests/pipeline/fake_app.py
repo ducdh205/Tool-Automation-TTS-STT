@@ -22,7 +22,8 @@ class FakeApp:
                  auto_stop: bool = False, sheet_opens: bool = True, mic_visible: bool = True,
                  launch_fixes: bool = True, silence_dumps: int | None = None,
                  keep_history: bool = False, mic_delay_checks: int = 0,
-                 stop_during_dump: bool = False, leave_after_stop: bool = False):
+                 stop_during_dump: bool = False, leave_after_stop: bool = False,
+                 form_after_speech: bool = False):
         self.transcript = transcript
         self.state = state
         self.auto_stop = auto_stop
@@ -35,6 +36,10 @@ class FakeApp:
         self.stop_during_dump = stop_during_dump
         self.leave_after_stop = leave_after_stop
         self._mic_live = mic_delay_checks == 0
+        # App 2026-11: what was heard opens a task form ("Bạn nói: “…”") instead of a chat bubble.
+        self.form_after_speech = form_after_speech
+        self.heard: str | None = None
+        self.drafts = 0  # "Giữ nháp" taps: junk drafts the tool must never leave behind
         self.bubbles: list[str] = []
         self.taps: list[str] = []
         self.launched = 0
@@ -56,8 +61,19 @@ class FakeApp:
             return [_n("Màn hình chính", (0, 0, 720, 1650), "android.view.View")]
         if self.state == "form":  # task form opened by a stray tap on the "Thử nói" suggestion
             return [_n("Đóng", (624, 81, 712, 169)), _n("Chọn người", (90, 651, 299, 747)), _n("Tạo việc", (470, 1366, 688, 1454))]
-        if self.state == "dialog":
-            return [_n("Ở lại", (353, 847, 460, 943)), _n("Bỏ", (476, 847, 592, 943))]
+        if self.state == "heard_form":  # real dump: backend/tests/fixtures/ui_form.xml
+            return [_n("Đóng", (616, 88, 712, 184)),
+                    _n(f"Bạn nói: “{self.heard}”", (32, 200, 688, 246), "android.view.View"),
+                    _n("Đã hiểu: …", (32, 254, 688, 392), "android.view.View"),
+                    UiNode(self.heard or "", "", "android.widget.EditText", (64, 508, 656, 644), True),
+                    _n("Gõ để sửa thẻ", (32, 1362, 128, 1458)),
+                    _n("Bấm để nói", (304, 1354, 416, 1466)),
+                    _n("Tạo việc", (469, 1366, 688, 1454))]
+        if self.state in ("dialog", "heard_dialog"):  # real dump: backend/tests/fixtures/ui_discard.xml
+            return [_n("Bỏ thay đổi?", (128, 547, 592, 611), "android.view.View"),
+                    _n("Tiếp tục chỉnh sửa", (305, 771, 592, 867)),
+                    _n("Bỏ thay đổi", (395, 867, 592, 963)),
+                    _n("Giữ nháp", (396, 963, 592, 1059))]
         if self.state == "home":
             return [_n("Nói để tạo việc", MIC)] if self.mic_visible else [_n("Việc", (160, 1436, 300, 1507))]
         return self._sheet_nodes()
@@ -85,12 +101,13 @@ class FakeApp:
             self._finish()
         elif label == "Bấm để nói":
             self.state = "listening"
-        elif label == "Bỏ":
+        elif label in ("Bỏ thay đổi", "Giữ nháp"):
+            self.drafts += label == "Giữ nháp"
             self.state = "home"
-        elif label == "Ở lại":
-            self.state = "form"
-        elif label == "Đóng" and self.state == "form":
-            self.state = "dialog"
+        elif label == "Tiếp tục chỉnh sửa":
+            self.state = "form" if self.state == "dialog" else "heard_form"
+        elif label == "Đóng" and self.state in ("form", "heard_form"):
+            self.state = "dialog" if self.state == "form" else "heard_dialog"
         elif label == "Đóng":
             self.state = "home"
             if not self.keep_history:
@@ -103,6 +120,12 @@ class FakeApp:
             return
         if self.state == "dialog":
             self.state = "form"
+            return
+        if self.state == "heard_form":
+            self.state = "heard_dialog"
+            return
+        if self.state == "heard_dialog":
+            self.state = "heard_form"
             return
         if self.state in ("listening", "idle"):
             self.state = "home"
@@ -141,7 +164,10 @@ class FakeApp:
     def _finish(self) -> None:
         self.state = "home" if self.leave_after_stop else "idle"
         if self.transcript is not None and getattr(self, "_heard", False):
-            self.bubbles.append(self.transcript)
+            if self.form_after_speech:
+                self.state, self.heard = "heard_form", self.transcript
+            else:
+                self.bubbles.append(self.transcript)
         self._heard = False
 
 

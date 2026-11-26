@@ -62,7 +62,9 @@ export interface ProgressEvent {
 
 export interface AppProfile {
   name: string; package: string; open_label: string; stop_label: string; idle_label: string;
-  close_label: string; sheet_label: string; discard_label?: string; pre_delay_s: number; post_delay_s: number;
+  close_label: string; sheet_label: string; discard_label?: string;
+  /** Start of the task-form line holding what the app heard, e.g. "Bạn nói: ". */
+  heard_prefix?: string; pre_delay_s: number; post_delay_s: number;
   listen_timeout_s: number; result_timeout_s: number;
   /** Pause between two sentences of a Block 2 run (seconds). */
   between_delay_s?: number;

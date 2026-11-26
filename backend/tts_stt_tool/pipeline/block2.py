@@ -14,7 +14,7 @@ from tts_stt_tool.config import Settings
 from tts_stt_tool.device.adb import Adb
 from tts_stt_tool.device.player import AudioPlayer
 from tts_stt_tool.device.profile import AppProfile
-from tts_stt_tool.device.ui_tree import UiNode, bubble_labels, find, new_bubble_after, parse_dump
+from tts_stt_tool.device.ui_tree import UiNode, bubble_labels, find, heard_text, new_bubble_after, parse_dump
 from tts_stt_tool.jobs.runner import Emit, ProgressEvent
 from tts_stt_tool.store.db import AppStatus, Store
 
@@ -117,7 +117,8 @@ async def _tap(dev: DeviceDriver, node: UiNode, log: list[str]) -> None:
 async def ensure_home(dev: DeviceDriver, p: AppProfile, log: list[str], sleep: Sleep) -> list[UiNode]:
     """Get back to the screen with the mic button using Back (never stale coordinate taps).
 
-    A stray tap can open a task form; Back on it asks "Ở lại / Bỏ" -> take the discard button.
+    A task form (opened by speaking, or by a stray tap) asks "Bỏ thay đổi?" on Back -> take the
+    discard button, never "Giữ nháp" (that would leave a junk draft behind).
     """
     for _ in range(4):
         nodes = await dev.nodes()
@@ -175,6 +176,23 @@ def _sheet_open(nodes: list[UiNode], p: AppProfile) -> bool:
     return any(find(nodes, label) for label in (p.close_label, p.stop_label, p.idle_label))
 
 
+DISCARD_WAIT_S = 3.0
+
+
+async def _discard_form(dev: DeviceDriver, p: AppProfile, log: list[str], sleep: Sleep) -> None:
+    """After Back on the task form: confirm "Bỏ thay đổi" so the next sentence starts clean.
+
+    Best effort — if the dialog does not show, ``ensure_home`` deals with it next time.
+    """
+    if not p.discard_label:
+        return
+    nodes = await _wait_for(dev, p.discard_label, DISCARD_WAIT_S, sleep)
+    if nodes is None:
+        log.append(f"Không thấy nút '{p.discard_label}' sau Back")
+        return
+    await _tap(dev, find(nodes, p.discard_label), log)  # type: ignore[arg-type]
+
+
 async def run_one(
     dev: DeviceDriver,
     p: AppProfile,
@@ -216,6 +234,7 @@ async def _run_one(dev: DeviceDriver, p: AppProfile, wav: Path, player: AudioPla
     if not _sheet_open(base, p):
         raise OperationError(f"Bảng '{p.sheet_label or p.close_label}' không mở")
     before = bubble_labels(base, dev.screen_w)
+    before_heard = heard_text(base, p.heard_prefix)  # a form left open must not count as new
     await sleep(p.post_delay_s)
 
     # Decide on the stop tap with the cheap mic check right before tapping: a fresh UI dump
@@ -231,10 +250,16 @@ async def _run_one(dev: DeviceDriver, p: AppProfile, wav: Path, player: AudioPla
         await _tap(dev, stop, log)
 
     text: str | None = None
+    on_form = False
     nodes = base
     async for nodes in _poll(dev, p.result_timeout_s, sleep):
         if not _sheet_open(nodes, p):
             raise OperationError(f"Bảng '{p.sheet_label or p.close_label}' không còn trên màn hình khi đọc kết quả")
+        heard = heard_text(nodes, p.heard_prefix)
+        if heard is not None and heard != before_heard:
+            text, on_form = heard, True
+            log.append(f"App nhận: {text}")
+            break
         bubble = new_bubble_after(before, nodes, dev.screen_w)
         if bubble:
             text = bubble.label
@@ -251,6 +276,8 @@ async def _run_one(dev: DeviceDriver, p: AppProfile, wav: Path, player: AudioPla
     # ~2.5 s old dump can land on the "Thử nói" suggestion and open a task form.
     log.append("Back (đóng bảng)")
     await dev.back()
+    if on_form:
+        await _discard_form(dev, p, log, sleep)
     return AppCapture(text=text, log=log, bubbles=bubbles, screenshot=shot)
 
 

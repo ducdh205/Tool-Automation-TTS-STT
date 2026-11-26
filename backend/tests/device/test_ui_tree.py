@@ -184,3 +184,60 @@ async def test_truncated_dump_is_retried():
     adb = Truncated(fails=0)
     assert "Dừng nghe" in await adb.dump_ui("serial")
     assert adb.dumps == 2
+
+
+# --- task form opened straight after speaking (app 2026-11) -------------------
+def test_heard_text_from_task_form():
+    from tts_stt_tool.device.ui_tree import heard_text
+    assert heard_text(load("ui_form"), "Bạn nói: ") == "nộp bản thảo"
+
+
+def test_heard_text_absent_on_chat_sheet():
+    from tts_stt_tool.device.ui_tree import heard_text
+    assert heard_text(load("ui_stopped"), "Bạn nói: ") is None
+    assert heard_text(load("ui_form"), "") is None  # feature off
+
+
+@pytest.mark.parametrize("label,expected", [
+    ("Bạn nói: “bật đèn”", "bật đèn"),
+    ('Bạn nói: "bật đèn"', "bật đèn"),
+    ("Bạn nói: bật đèn", "bật đèn"),
+    ("Bạn nói: “”", None),
+])
+def test_heard_text_quotes(label, expected):
+    from tts_stt_tool.device.ui_tree import heard_text
+    node = UiNode(text="", desc=label, cls="android.view.View", bounds=(32, 200, 688, 246), clickable=False)
+    assert heard_text([node], "Bạn nói: ") == expected
+
+
+def test_task_form_has_no_user_bubbles():
+    """The form's 'Bạn nói' line is left-aligned: the chat-bubble reader must not be relied on."""
+    assert right_bubbles(load("ui_form"), 720) == []
+
+
+def test_discard_dialog_button():
+    nodes = load("ui_discard")
+    assert find(nodes, "Bỏ thay đổi").center == (493, 915)
+    assert find(nodes, "Bỏ") is None  # the old label no longer matches anything
+
+
+def test_char_counter_is_never_a_bubble():
+    """App 2026-11: the listening sheet has no EditText (live text sits on the sheet itself),
+    so the counter 'Còn lại 981 ký tự' must be filtered by its label, not by its position."""
+    nodes = load("ui_listening_v2")
+    assert not any(n.cls.endswith("EditText") for n in nodes)
+    assert find(nodes, "Còn lại 981 ký tự") is not None
+    assert right_bubbles(nodes, 720) == []
+
+
+def test_labels_are_nfc_normalized():
+    """The app emits decomposed marks ('o' + U+0300); labels must compare as typed (NFC)."""
+    import unicodedata
+    for n in load("ui_listening_v2"):
+        assert n.text == unicodedata.normalize("NFC", n.text)
+        assert n.desc == unicodedata.normalize("NFC", n.desc)
+
+
+def test_find_accepts_decomposed_query():
+    import unicodedata
+    assert find(load("ui_discard"), unicodedata.normalize("NFD", "Bỏ thay đổi")) is not None

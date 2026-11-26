@@ -631,6 +631,7 @@ class ProfileIn(BaseModel):
     close_label: str = Field(min_length=1)
     sheet_label: str = ""
     discard_label: str = ""
+    heard_prefix: str = ""
     pre_delay_s: float = Field(ge=0, le=10)
     post_delay_s: float = Field(ge=0, le=10)
     listen_timeout_s: float = Field(gt=0, le=60)

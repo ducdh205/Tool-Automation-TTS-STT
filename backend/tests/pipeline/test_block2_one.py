@@ -165,10 +165,11 @@ async def test_op_error_carries_log():
 
 
 async def test_recovers_from_task_form_via_discard_dialog():
-    """Real phone: a stray tap opened a task form; Back shows 'Ở lại' / 'Bỏ'."""
+    """Real phone: a stray tap opened a task form; Back shows 'Bỏ thay đổi?'."""
     app = FakeApp(state="form")
     cap = await one(app)
-    assert "Bỏ" in app.taps
+    assert "Bỏ thay đổi" in app.taps
+    assert app.drafts == 0
     assert app.launched == 0
     assert cap.text == "chỉnh nhiệt độ ghế lái lên 24 độ"
 
@@ -200,3 +201,51 @@ async def test_screencap_failure_keeps_result():
     cap = await run_one(app, AppProfile(), WAV, app, sleep=no_sleep, is_correct=lambda t: False)
     assert cap.text == "sai" and cap.screenshot is None
     assert any("Không chụp được màn hình" in line for line in cap.log)
+
+
+# --- app 2026-11: speaking opens a task form ("Bạn nói: “…”") -----------------
+async def test_reads_heard_text_from_task_form():
+    app = FakeApp(transcript="nộp bản thảo", form_after_speech=True)
+    cap = await one(app)
+    assert cap.text == "nộp bản thảo"
+    assert any("App nhận: nộp bản thảo" in line for line in cap.log)
+
+
+async def test_task_form_closed_by_discarding_never_keeping_a_draft():
+    app = FakeApp(transcript="nộp bản thảo", form_after_speech=True)
+    await one(app)
+    assert app.state == "home"
+    assert app.taps[-2:] == ["BACK", "Bỏ thay đổi"]
+    assert app.drafts == 0 and "Tạo việc" not in app.taps
+
+
+async def test_task_form_twice_in_a_row():
+    app = FakeApp(transcript="nộp bản thảo", form_after_speech=True)
+    await one(app)
+    app.transcript = "gọi cho anh Huy"
+    cap = await one(app)
+    assert cap.text == "gọi cho anh Huy"
+    assert app.launched == 0 and app.drafts == 0
+
+
+async def test_task_form_wrong_text_photographed_on_the_form():
+    app = FakeApp(transcript="nộp bản thảo", form_after_speech=True)
+    cap = await run_one(app, AppProfile(), WAV, app, sleep=no_sleep, is_correct=lambda t: False)
+    assert cap.screenshot is not None
+    assert app.shots == ["heard_form"]
+
+
+@pytest.mark.parametrize("state", ["heard_form", "heard_dialog"])
+async def test_left_on_heard_form_recovers(state):
+    """A previous run stopped on the form (or its dialog): discard it and carry on."""
+    app = FakeApp(state=state, form_after_speech=True)
+    app.heard = "câu cũ"
+    cap = await one(app)
+    assert cap.text == "chỉnh nhiệt độ ghế lái lên 24 độ"
+    assert "Bỏ thay đổi" in app.taps and app.drafts == 0
+
+
+async def test_heard_prefix_off_falls_back_to_bubbles():
+    app = FakeApp()
+    cap = await run_one(app, AppProfile(heard_prefix=""), WAV, app, sleep=no_sleep)
+    assert cap.text == "chỉnh nhiệt độ ghế lái lên 24 độ"
