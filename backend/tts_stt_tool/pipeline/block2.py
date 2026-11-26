@@ -358,6 +358,8 @@ async def run_block2(
             emit(ProgressEvent("", "cancelled", done, total))
             return
         label = f"[{done + 1}/{total}] {row['tc_id']}"
+        # read per sentence: the user may change the run's threshold while it goes
+        threshold = (store.get_app_run(app_run_id) or {}).get("wer_threshold", 0.0)
         emit(ProgressEvent("", "log", done, total, message=f"{label}: {row['text_tts']}"))
         try:
             if not row["audio_path"] or not Path(row["audio_path"]).is_file():
@@ -367,7 +369,7 @@ async def run_block2(
             else:
                 text_tts = row["text_tts"]
                 cap = await run_one(dev, profile, Path(row["audio_path"]), player,
-                                    is_correct=lambda heard: compare(text_tts, heard, settings.wer_threshold).correct)
+                                    is_correct=lambda heard: compare(text_tts, heard, threshold).correct)
         except Exception as e:  # OperationError, adb failures: the tool, not the app, failed
             op_errors += 1
             msg = str(e) or type(e).__name__
@@ -386,7 +388,7 @@ async def run_block2(
             continue
         op_errors = 0
         heard = cap.text or ""
-        result = compare(row["text_tts"], heard, settings.wer_threshold)
+        result = compare(row["text_tts"], heard, threshold)
         status = AppStatus.PASSED if result.correct else AppStatus.FAILED
         shot_path = save_shot(row["id"], cap.screenshot, cap.log)
         store.record_app_result(row["id"], status, heard, result, None, "\n".join(cap.log),

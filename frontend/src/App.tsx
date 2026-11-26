@@ -95,6 +95,20 @@ export default function App() {
     api.settings().then(setSettings).catch(() => setSettingsLoadFailed(true));
   }, []);
 
+  const setRunThreshold = async (runId: number, werThreshold: number) => {
+    try {
+      const saved = await api.setRunThreshold(runId, werThreshold);
+      setAppRuns((rs) => rs.map((r) => (r.id === saved.id ? saved : r)));
+      setSettings((s) => (s ? { ...s, app_wer_threshold: saved.wer_threshold } : s));
+      if (appRunRef.current === runId) await loadAppResults(runId);
+      const pct = Math.round(saved.wer_threshold * 1000) / 10;
+      notify(`Đã chấm lại lần test #${runId}: Đúng khi WER ≤ ${pct.toLocaleString("vi-VN")}%.`);
+    } catch (e) {
+      notifyError(e);
+      throw e;
+    }
+  };
+
   const saveProfile = async (p: AppProfile) => {
     try {
       const saved = await api.saveProfile(p);
@@ -468,6 +482,7 @@ export default function App() {
             onResume={resumeApp}
             onRerun={rerunApp}
             onSelectRun={setAppRunId}
+            onSetThreshold={setRunThreshold}
           />
           )}
         />

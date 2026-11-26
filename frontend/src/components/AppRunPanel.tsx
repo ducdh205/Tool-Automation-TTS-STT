@@ -22,6 +22,8 @@ interface Props {
   /** Runs the picked cases again inside the selected run (its other results stay). */
   onRerun?: (runId: number, serial: string) => void;
   onSelectRun: (runId: number | null) => void;
+  /** Grades the selected run again: "Đúng" when WER ≤ the new threshold (0..1). */
+  onSetThreshold?: (runId: number, werThreshold: number) => Promise<void>;
 }
 
 /** Same upper bound as the backend (ProfileIn.between_delay_s). */
@@ -59,6 +61,24 @@ export function AppRunPanel(p: Props) {
   };
 
   const run = p.runs.find((r) => r.id === p.runId);
+  // WER threshold of the shown run, in % (the API keeps 0..1)
+  const savedWer = run ? String(Math.round(run.wer_threshold * 1000) / 10) : "";
+  const [wer, setWer] = useState<string | null>(null); // null = show the saved value
+  useEffect(() => setWer(null), [run?.id, savedWer]);
+  const werValue = wer ?? savedWer;
+  const werValid = werValue.trim() !== "" && Number(werValue) >= 0 && Number(werValue) <= 100;
+  const commitWer = async () => {
+    if (wer === null || !run || !p.onSetThreshold) return;
+    if (!werValid || Number(wer) === Number(savedWer)) {
+      setWer(null);
+      return;
+    }
+    try {
+      await p.onSetThreshold(run.id, Number(wer) / 100);
+    } catch {
+      setWer(null);
+    }
+  };
   const pending = run ? (run.summary["Chờ"] ?? 0) + (run.summary["Lỗi thao tác"] ?? 0) : 0;
   const canStart = !!serial && !!profile && !p.busy && p.readyCount > 0;
   // Picking cases while a run is shown means "run these again": keep them in that run.
@@ -127,6 +147,21 @@ export function AppRunPanel(p: Props) {
         {shownRuns.map((r) => <option key={r.id} value={r.id}>{runLabel(r)}</option>)}
         {hiddenRuns > 0 && <option value={MORE}>Xem thêm ({hiddenRuns} lần test cũ hơn)…</option>}
       </select>
+      {p.onSetThreshold && run && (
+        <label className="gap-field"
+          title={"Câu được chấm Đúng khi WER ≤ ngưỡng này (0% = phải khớp hoàn toàn). Đổi ngưỡng sẽ chấm lại"
+            + ` các câu đã chạy của lần test #${run.id}; lần test mới cũng dùng ngưỡng này.`}>
+          <span>Đúng khi WER ≤</span>
+          <input type="number" min={0} max={100} step={5} aria-label="Ngưỡng WER để chấm Đúng (%)"
+            aria-invalid={!werValid} value={werValue}
+            onChange={(e) => setWer(e.target.value)} onBlur={() => void commitWer()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") e.currentTarget.blur();
+              if (e.key === "Escape") setWer(null);
+            }} />
+          <span>%</span>
+        </label>
+      )}
       <button className="btn" disabled={!run || p.busy || pending === 0} onClick={() => run && p.onResume(run.id)}>
         <Icon name="refresh" />Chạy tiếp{pending ? ` (${pending})` : ""}
       </button>

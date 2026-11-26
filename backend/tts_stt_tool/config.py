@@ -19,7 +19,8 @@ class Settings:
     voice_nam: str | None = "Thùy Dung"
     voice_speed: float = 1.0  # 1.0 = as synthesized; see tts/speed.py
     max_regen: int = 3
-    wer_threshold: float = 0.0
+    wer_threshold: float = 0.0  # Block 1: STT check of the generated audio
+    app_wer_threshold: float = 0.0  # Block 2: what a new app run starts with (each run keeps its own)
     reject_warn_ratio: float = 0.10
     wyoming_host: str = "127.0.0.1"
     wyoming_port: int = 10300

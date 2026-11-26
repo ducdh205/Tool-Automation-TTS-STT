@@ -1,4 +1,5 @@
 import io
+import sqlite3
 from pathlib import Path
 
 import openpyxl
@@ -296,3 +297,41 @@ def test_rerun_refuses_another_phone_and_empty_picks(ctx):
     assert c.post(f"/api/app-runs/{run_id}/rerun", json={"serial": "SER", "item_ids": skipped}).status_code == 422
     assert c.post(f"/api/app-runs/{run_id}/rerun", json={"serial": "SER", "item_ids": []}).status_code == 422
     assert c.post("/api/app-runs/9999/rerun", json={"serial": "SER", "item_ids": [1]}).status_code == 404
+
+
+def test_run_threshold_regrades_results_and_becomes_the_default(ctx):
+    c, app, fake, tmp_path = ctx
+    set_id, run_id = finished_run(c, tmp_path)
+    run = next(r for r in c.get(f"/api/audio-sets/{set_id}/app-runs").json() if r["id"] == run_id)
+    assert run["wer_threshold"] == 0
+    rows = c.get(f"/api/app-runs/{run_id}/results").json()
+    assert all(x["status"] == "Sai" for x in rows)
+    with sqlite3.connect(tmp_path / "tool.db") as db:  # one near miss, one far off
+        db.execute("UPDATE app_results SET wer=0.2 WHERE id=?", (rows[0]["id"],))
+        db.execute("UPDATE app_results SET wer=0.5 WHERE id=?", (rows[1]["id"],))
+
+    r = c.put(f"/api/app-runs/{run_id}/threshold", json={"wer_threshold": 0.2})
+    assert r.status_code == 200, r.text
+    assert r.json()["wer_threshold"] == 0.2 and r.json()["summary"] == {"Đúng": 1, "Sai": 1}
+    got = {x["id"]: x["status"] for x in c.get(f"/api/app-runs/{run_id}/results").json()}
+    assert got == {rows[0]["id"]: "Đúng", rows[1]["id"]: "Sai"}
+    assert c.put(f"/api/app-runs/{run_id}/threshold", json={"wer_threshold": 0.5}).json()["summary"] == {"Đúng": 2}
+
+    # back down: the same rows are wrong again; the new value is what the next run starts with
+    r = c.put(f"/api/app-runs/{run_id}/threshold", json={"wer_threshold": 0})
+    assert r.json()["summary"] == {"Sai": 2}
+    assert c.get("/api/settings").json()["app_wer_threshold"] == 0
+    c.put(f"/api/app-runs/{run_id}/threshold", json={"wer_threshold": 0.3})
+    assert c.get("/api/settings").json()["app_wer_threshold"] == 0.3
+    r = c.post(f"/api/audio-sets/{set_id}/app-runs", json={"serial": "SER", "profile": fast_profile(c)})
+    wait_job_end(c)
+    new = next(x for x in c.get(f"/api/audio-sets/{set_id}/app-runs").json() if x["id"] == r.json()["id"])
+    assert new["wer_threshold"] == 0.3
+
+    assert c.put(f"/api/app-runs/{run_id}/threshold", json={"wer_threshold": 1.5}).status_code == 422
+    assert c.put("/api/app-runs/999/threshold", json={"wer_threshold": 0.1}).status_code == 404
+    # saving the Block 1 settings form leaves the Block 2 default alone
+    s = c.get("/api/settings").json()
+    s.pop("app_wer_threshold")
+    assert c.put("/api/settings", json=s).status_code == 200
+    assert c.get("/api/settings").json()["app_wer_threshold"] == 0.3

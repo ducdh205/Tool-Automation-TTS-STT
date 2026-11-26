@@ -12,6 +12,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+from tts_stt_tool.compare.normalize import normalize
 from tts_stt_tool.compare.score import CompareResult
 from tts_stt_tool.input.filters import classify
 from tts_stt_tool.models import InputItem
@@ -80,7 +81,8 @@ CREATE TABLE IF NOT EXISTS app_runs (
     id INTEGER PRIMARY KEY,
     audio_set_id INTEGER NOT NULL REFERENCES audio_sets(id) ON DELETE CASCADE,
     serial TEXT, device_model TEXT, profile_name TEXT, app_version TEXT,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    wer_threshold REAL NOT NULL DEFAULT 0  -- a result is "Đúng" when its WER is at most this
 );
 CREATE TABLE IF NOT EXISTS app_results (
     id INTEGER PRIMARY KEY,
@@ -161,6 +163,8 @@ class Store:
             for col, kind in (("source_path", "TEXT"), ("header_row", "INTEGER")):
                 if col not in cols:
                     c.execute(f"ALTER TABLE audio_sets ADD COLUMN {col} {kind}")
+            if "wer_threshold" not in {r["name"] for r in c.execute("PRAGMA table_info(app_runs)")}:
+                c.execute("ALTER TABLE app_runs ADD COLUMN wer_threshold REAL NOT NULL DEFAULT 0")
 
     @contextmanager
     def _conn(self) -> Iterator[sqlite3.Connection]:
@@ -424,13 +428,13 @@ class Store:
     # -- block 2 (app runs) ------------------------------------------------
     def create_app_run(
         self, audio_set_id: int, serial: str, device_model: str | None, profile_name: str, app_version: str | None,
-        item_ids: list[int] | None = None,
+        item_ids: list[int] | None = None, wer_threshold: float = 0.0,
     ) -> int:
         with self._conn() as c:
             cur = c.execute(
-                "INSERT INTO app_runs(audio_set_id, serial, device_model, profile_name, app_version, created_at)"
-                " VALUES (?,?,?,?,?,?)",
-                (audio_set_id, serial, device_model, profile_name, app_version, _now()),
+                "INSERT INTO app_runs(audio_set_id, serial, device_model, profile_name, app_version, created_at,"
+                " wer_threshold) VALUES (?,?,?,?,?,?,?)",
+                (audio_set_id, serial, device_model, profile_name, app_version, _now(), wer_threshold),
             )
             run_id = int(cur.lastrowid)
             # every row with audio goes to the app, whatever its verify result (shown beside it)
@@ -457,6 +461,25 @@ class Store:
         with self._conn() as c:
             rows = c.execute("SELECT * FROM app_runs WHERE audio_set_id=? ORDER BY id DESC", (audio_set_id,)).fetchall()
         return [{**dict(r), "summary": self.app_summary(r["id"])} for r in rows]
+
+    def set_app_threshold(self, run_id: int, wer_threshold: float) -> bool:
+        """Change what counts as "Đúng" in this run and grade its finished results again.
+
+        Only "Đúng"/"Sai" rows change (an operation error or a waiting row has no WER); an empty
+        answer stays "Sai" whatever the threshold. Earlier attempts in the history keep their grade.
+        """
+        with self._conn() as c:
+            if not c.execute("UPDATE app_runs SET wer_threshold=? WHERE id=?", (wer_threshold, run_id)).rowcount:
+                return False
+            rows = c.execute(
+                "SELECT id, app_text, wer FROM app_results WHERE app_run_id=? AND status IN (?,?) AND wer IS NOT NULL",
+                (run_id, AppStatus.PASSED.value, AppStatus.FAILED.value),
+            ).fetchall()
+            for r in rows:
+                ok = bool(normalize(r["app_text"] or "")) and r["wer"] <= wer_threshold
+                c.execute("UPDATE app_results SET status=? WHERE id=?",
+                          ((AppStatus.PASSED if ok else AppStatus.FAILED).value, r["id"]))
+            return True
 
     def rerun_app_results(self, run_id: int, item_ids: list[int]) -> int:
         """Queue ``item_ids`` again in this run; every other result of the run stays as it is.

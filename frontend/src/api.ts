@@ -33,7 +33,7 @@ export interface ColumnMapping {
 export interface Settings {
   voice: string | null; voice_trung: string | null; voice_nam: string | null;
   /** 1 = as synthesized; 0.7–1.3, pitch kept (Block 1 time-stretches the audio). */
-  voice_speed?: number; max_regen: number; wer_threshold: number; reject_warn_ratio: number;
+  voice_speed?: number; max_regen: number; wer_threshold: number; app_wer_threshold?: number; reject_warn_ratio: number;
   wyoming_host: string; wyoming_port: number; stt_timeout_s: number; wyoming_cmd: string[]; port: number;
 }
 export interface Health { wyoming: boolean; wyoming_error: string | null; gpu: boolean; job: Job | null }
@@ -74,6 +74,8 @@ export type AppStatus = "Chờ" | "Đúng" | "Sai" | "Lỗi thao tác";
 export interface AppRun {
   id: number; audio_set_id: number; serial: string; device_model: string | null; profile_name: string;
   app_version: string | null; created_at: string; summary: Record<string, number>;
+  /** A result is "Đúng" when its WER (0..1) is at most this. */
+  wer_threshold: number;
 }
 export interface AppResult {
   id: number; app_run_id: number; item_id: number; status: AppStatus; app_text: string | null;
@@ -182,6 +184,9 @@ export const api = {
     a.href = r.download_url;
     a.click();
   },
+  /** Grade the run again with another WER threshold (0..1); new runs start with it too. */
+  setRunThreshold: (runId: number, werThreshold: number) =>
+    req<AppRun>("PUT", `/api/app-runs/${runId}/threshold`, { wer_threshold: werThreshold }),
   resumeAppRun: (runId: number) => req<{ job_id: string }>("POST", `/api/app-runs/${runId}/resume`),
   /** Run the picked cases again inside this run: its other results stay. */
   rerunAppRun: (runId: number, serial: string, itemIds: number[]) =>

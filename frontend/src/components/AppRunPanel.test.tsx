@@ -5,7 +5,8 @@ const profile = { name: "Vita Work (dev)", package: "p", open_label: "a", stop_l
   close_label: "d", sheet_label: "", pre_delay_s: 1, post_delay_s: 1, listen_timeout_s: 6, result_timeout_s: 10 };
 const device = { serial: "S", state: "device", model: "M" };
 const run = { id: 7, audio_set_id: 1, serial: "S", device_model: "M", profile_name: "Vita Work (dev)",
-  app_version: "1.0", created_at: "2026-11-20T15:00:00", summary: { "Đúng": 3, "Sai": 1, "Lỗi thao tác": 1 } };
+  app_version: "1.0", created_at: "2026-11-20T15:00:00", summary: { "Đúng": 3, "Sai": 1, "Lỗi thao tác": 1 },
+  wer_threshold: 0 };
 
 function panel(over: Partial<Parameters<typeof AppRunPanel>[0]> = {}) {
   return {
@@ -16,6 +17,18 @@ function panel(over: Partial<Parameters<typeof AppRunPanel>[0]> = {}) {
 }
 
 describe("AppRunPanel", () => {
+  it("regrades the shown run with a new WER threshold", () => {
+    const onSetThreshold = vi.fn().mockResolvedValue(undefined);
+    render(<AppRunPanel {...panel({ runs: [run], runId: 7, onSetThreshold })} />);
+    const box = screen.getByRole("spinbutton", { name: "Ngưỡng WER để chấm Đúng (%)" }) as HTMLInputElement;
+    expect(box.value).toBe("0");
+    fireEvent.change(box, { target: { value: "20" } });
+    fireEvent.blur(box);
+    expect(onSetThreshold).toHaveBeenCalledWith(7, 0.2);
+    fireEvent.change(box, { target: { value: "150" } });
+    fireEvent.blur(box);
+    expect(onSetThreshold).toHaveBeenCalledTimes(1); // out of range: back to the saved value
+  });
   it("disables run without a connected device", () => {
     render(<AppRunPanel {...panel({ devices: [] })} />);
     expect((screen.getByText("Chạy trên app (tất cả)") as HTMLButtonElement).disabled).toBe(true);

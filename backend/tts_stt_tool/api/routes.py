@@ -436,6 +436,8 @@ class SettingsIn(BaseModel):
     voice_speed: float = Field(default=1.0, ge=MIN_SPEED, le=MAX_SPEED)
     max_regen: int = Field(ge=0, le=10)
     wer_threshold: float = Field(ge=0, le=1)
+    # Block 2 default; changed from the app run toolbar, so the Block 1 form may leave it out
+    app_wer_threshold: float | None = Field(default=None, ge=0, le=1)
     reject_warn_ratio: float = Field(ge=0, le=1)
     wyoming_host: str
     wyoming_port: int = Field(ge=1, le=65535)
@@ -451,7 +453,8 @@ class SettingsIn(BaseModel):
 @router.put("/settings")
 def put_settings(request: Request, body: SettingsIn) -> dict[str, Any]:
     ctx = ctx_of(request)
-    for k, v in body.model_dump(exclude={"tts_device"}).items():
+    skip = {"tts_device"} | ({"app_wer_threshold"} if body.app_wer_threshold is None else set())
+    for k, v in body.model_dump(exclude=skip).items():
         setattr(ctx.settings, k, v)
     save_settings(ctx.settings)
     if isinstance(ctx.stt, WyomingStt):  # apply without restart
@@ -743,7 +746,8 @@ async def create_app_run(request: Request, set_id: int, body: AppRunIn) -> dict[
     if not ctx.store.count_with_audio(set_id):
         raise HTTPException(422, "Bộ audio chưa có câu nào có audio — sinh audio ở Khối 1 trước")
     model, version = await _device_model_version(ctx, body.serial, profile.package)
-    run_id = ctx.store.create_app_run(set_id, body.serial, model, profile.name, version, item_ids=body.item_ids)
+    run_id = ctx.store.create_app_run(set_id, body.serial, model, profile.name, version, item_ids=body.item_ids,
+                                      wer_threshold=ctx.settings.app_wer_threshold)
     if not ctx.store.app_results(run_id):
         ctx.store.delete_app_run(run_id)
         raise HTTPException(422, "Không có câu nào có audio trong các case đã chọn")
@@ -755,6 +759,22 @@ def _require_run(ctx: AppContext, run_id: int) -> dict[str, Any]:
     if run is None:
         raise HTTPException(404, "Không tìm thấy lần test app")
     return run
+
+
+class ThresholdIn(BaseModel):
+    wer_threshold: float = Field(ge=0, le=1)
+
+
+@router.put("/app-runs/{run_id}/threshold")
+def set_run_threshold(request: Request, run_id: int, body: ThresholdIn) -> dict[str, Any]:
+    """Grade this run again with another WER threshold; the next new run starts with it too."""
+    ctx = ctx_of(request)
+    _require_run(ctx, run_id)
+    ctx.store.set_app_threshold(run_id, body.wer_threshold)
+    if ctx.settings.app_wer_threshold != body.wer_threshold:
+        ctx.settings.app_wer_threshold = body.wer_threshold
+        save_settings(ctx.settings)
+    return {**(ctx.store.get_app_run(run_id) or {}), "summary": ctx.store.app_summary(run_id)}
 
 
 @router.post("/app-runs/{run_id}/resume")
