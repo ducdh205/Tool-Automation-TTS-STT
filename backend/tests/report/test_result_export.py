@@ -166,10 +166,12 @@ def test_screenshot_embedded_for_fail_and_op_error(tmp_path, session):
     assert ws["G4"].value == "Ảnh màn hình"
     images = _images_by_cell(ws)
     assert set(images) == {"G6", "G7"}
-    assert images["G6"].height == 240 and images["G6"].width == 108
-    assert ws.row_dimensions[6].height >= 180
+    img = images["G6"]
+    assert (img.width, img.height) == (720, 1600)  # embedded sharp: 1080x2400 scaled to 1600 tall
+    assert (img.anchor.ext.width, img.anchor.ext.height) == (216 * 9525, 480 * 9525)  # shown 480 px tall
+    assert ws.row_dimensions[6].height >= 360
     assert ws.row_dimensions[5].height is None  # Pass row keeps its height
-    assert ws.column_dimensions["G"].width == 22
+    assert ws.column_dimensions["G"].width == 34
 
 
 def test_screenshot_missing_or_unreadable(tmp_path, session):

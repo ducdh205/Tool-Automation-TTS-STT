@@ -25,10 +25,11 @@ from tts_stt_tool.store.db import AppStatus, Store
 
 OVERVIEW_SHEET = "Tổng hợp phiên"
 RESULT_HEADERS = ["Text app nghe được", "Kết quả", "Ghi chú", "Ảnh màn hình"]
-_RESULT_WIDTHS = (40, 14, 50, 22)
+_RESULT_WIDTHS = (40, 14, 50, 34)
 _RESULT_WRAP = (True, False, True, True)
-SHOT_HEIGHT_PX = 240
-_SHOT_ROW_PT = SHOT_HEIGHT_PX * 0.75 + 6  # row height in points that fits the thumbnail
+SHOT_HEIGHT_PX = 480  # height the screenshot is shown at in its cell
+SHOT_STORE_PX = 1600  # height the embedded image keeps, so zooming in / resizing it stays sharp
+_SHOT_ROW_PT = SHOT_HEIGHT_PX * 0.75 + 6  # row height in points that fits the shown image
 _SHOT_STATUSES = (AppStatus.FAILED.value, AppStatus.OP_ERROR.value)
 SHOT_MISSING = "(không tìm thấy ảnh)"
 _PLAIN_HEADERS = ["TC_ID", "Lượt", "Vùng miền", "Câu gốc", "Kết quả mong đợi"]
@@ -68,19 +69,28 @@ def result_suffix(audio_set: dict[str, Any]) -> str:
 
 
 def _thumbnail(path: Path) -> XlImage | None:
-    """A JPEG copy SHOT_HEIGHT_PX tall (full phone screenshots would bloat the workbook)."""
+    """A JPEG copy at most SHOT_STORE_PX tall, shown SHOT_HEIGHT_PX tall in the cell.
+
+    The pixels stay high-resolution so the text on the screen is readable when the image is zoomed
+    or enlarged in Excel; only the displayed size is small.
+    """
     from PIL import Image
 
     try:
         with Image.open(path) as im:
             im = im.convert("RGB")
-            im.thumbnail((im.width * SHOT_HEIGHT_PX // max(im.height, 1) or 1, SHOT_HEIGHT_PX))
+            if im.height > SHOT_STORE_PX:
+                im.thumbnail((im.width * SHOT_STORE_PX // im.height or 1, SHOT_STORE_PX), Image.LANCZOS)
+            w, h = im.size
             buf = io.BytesIO()
-            im.save(buf, "JPEG", quality=80)
+            im.save(buf, "JPEG", quality=90)
     except (OSError, ValueError):  # missing or not an image
         return None
     buf.seek(0)
-    return XlImage(buf)
+    img = XlImage(buf)
+    img.height = SHOT_HEIGHT_PX
+    img.width = max(1, round(w * SHOT_HEIGHT_PX / max(h, 1)))
+    return img
 
 
 def _write_screenshot(ws: Any, row: int, col: int, result: dict[str, Any]) -> None:
