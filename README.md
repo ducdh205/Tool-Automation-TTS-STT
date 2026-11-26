@@ -133,6 +133,26 @@ Hồ sơ lưu ở `data/profiles/`.
 Cách tool chạy một câu: bấm mic → chờ mic thật sự thu (`dumpsys audio`) → 0,3 s → phát audio → 1 s →
 bấm "Dừng nghe" (nếu app chưa tự dừng) → đọc bong bóng chat mới bên phải (`uiautomator dump`) → bấm "Đóng".
 
+### iPhone (WebDriverAgent, không cần Mac)
+
+Cần: `vendor/go-ios/ios.exe` (+ `wintun.dll`), iTunes / Apple Mobile Device Support, iPhone bật
+**Developer Mode**, WebDriverAgent đã ký và cài lên máy (`vendor/wda/WDA.ipa`, ký bằng Sideloadly; Apple ID
+thường hết hạn sau 7 ngày — ký lại). Mỗi lần test, mở 3 cửa sổ PowerShell:
+
+```powershell
+# 1. Nạp developer disk image (lại sau mỗi lần khởi động lại iPhone)
+uv tool run --python 3.12 --from pymobiledevice3 python -m pymobiledevice3 mounter auto-mount
+# 2. Chạy WebDriverAgent (để cửa sổ mở)
+uv tool run --python 3.12 --from pymobiledevice3 python -m pymobiledevice3 developer dvt xcuitest <bundle id WDA>.xctrunner --userspace
+# 3. Chuyển cổng (để cửa sổ mở)
+vendor\go-ios\ios.exe forward 8100 8100
+```
+
+Tool tự nhận iPhone (qua go-ios) — bảng Thiết bị báo *Chưa chạy WebDriverAgent* nếu bước 2–3 chưa chạy.
+Cùng hồ sơ app (bundle id = package). Khác Android: tool chờ nút "Dừng nghe" hiện ra thay cho `dumpsys audio`,
+"Back" = chạm "Đóng" (không có thì vuốt từ mép trái), gõ được chữ có dấu; không có phím Đa nhiệm / Nguồn.
+Một WebDriverAgent (cổng 8100) điều khiển một iPhone; đổi cổng: `wda_url` trong `data/settings.json`.
+
 Test trên trình duyệt (Edge, cần server và điện thoại): `uv run python tests/e2e/browser_e2e.py --items 5`
 (không có điện thoại: thêm `--no-phone` để chỉ chạy Bước 1 và kiểm tra theme).
 

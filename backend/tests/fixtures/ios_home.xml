@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<XCUIElementTypeApplication type="XCUIElementTypeApplication" name="Vita Work Dev" label="Vita Work Dev" enabled="true" visible="true" accessible="false" x="0" y="0" width="393" height="852" index="0" traits="" processId="1176" bundleId="com.vita.suite.dev">
+  <XCUIElementTypeWindow type="XCUIElementTypeWindow" enabled="true" visible="true" accessible="false" x="0" y="0" width="393" height="852" index="0" traits="">
+    <XCUIElementTypeOther type="XCUIElementTypeOther" enabled="true" visible="true" accessible="false" x="0" y="0" width="393" height="852" index="0" traits="">
+      <XCUIElementTypeOther type="XCUIElementTypeOther" enabled="true" visible="true" accessible="false" x="0" y="0" width="393" height="852" index="0" traits="">
+        <XCUIElementTypeOther type="XCUIElementTypeOther" enabled="true" visible="true" accessible="false" x="0" y="0" width="393" height="852" index="0" traits="">
+          <XCUIElementTypeOther type="XCUIElementTypeOther" enabled="true" visible="true" accessible="false" x="0" y="0" width="393" height="852" index="0" traits="">
+            <XCUIElementTypeOther type="XCUIElementTypeOther" enabled="true" visible="true" accessible="false" x="0" y="0" width="393" height="852" index="0" traits=""/>
+            <XCUIElementTypeOther type="XCUIElementTypeOther" enabled="true" visible="true" accessible="false" x="0" y="0" width="393" height="852" index="1" traits="">
+              <XCUIElementTypeOther type="XCUIElementTypeOther" enabled="true" visible="true" accessible="false" x="0" y="0" width="393" height="852" index="0" traits=""/>
+              <XCUIElementTypeOther type="XCUIElementTypeOther" enabled="true" visible="true" accessible="false" x="0" y="0" width="393" height="852" index="1" traits="">
+                <XCUIElementTypeOther type="XCUIElementTypeOther" enabled="true" visible="true" accessible="false" x="0" y="0" width="393" height="852" index="0" traits=""/>
+                <XCUIElementTypeOther type="XCUIElementTypeOther" enabled="true" visible="true" accessible="false" x="0" y="0" width="393" height="852" index="1" traits="">
+                  <XCUIElementTypeOther type="XCUIElementTypeOther" enabled="true" visible="true" accessible="false" x="0" y="0" width="393" height="852" index="0" traits=""/>
+                  <XCUIElementTypeOther type="XCUIElementTypeOther" enabled="true" visible="true" accessible="false" x="0" y="0" width="393" height="852" index="1" traits="">
+                    <XCUIElementTypeOther type="XCUIElementTypeOther" enabled="true" visible="true" accessible="false" x="0" y="0" width="393" height="852" index="0" traits=""/>
+                    <XCUIElementTypeOther type="XCUIElementTypeOther" enabled="true" visible="true" accessible="false" x="0" y="0" width="393" height="852" index="1" traits="">
+                      <XCUIElementTypeScrollView type="XCUIElementTypeScrollView" enabled="true" visible="true" accessible="true" x="0" y="0" width="393" height="852" index="0" traits=""/>
+                      <XCUIElementTypeOther type="XCUIElementTypeOther" enabled="true" visible="true" accessible="false" x="0" y="0" width="393" height="852" index="1" traits="">
+                        <XCUIElementTypeOther type="XCUIElementTypeOther" name="Chào buổi chiều, Thảo&#10;T5 26/11" label="Chào buổi chiều, Thảo&#10;T5 26/11" enabled="true" visible="true" accessible="true" x="16" y="67" width="361" height="107" index="0" traits=""/>
+                        <XCUIElementTypeImage type="XCUIElementTypeImage" name="Vita Work" label="Vita Work" enabled="true" visible="true" accessible="true" x="16" y="77" width="78" height="24" index="1" traits="Image"/>
+                        <XCUIElementTypeButton type="XCUIElementTypeButton" name="Sản phẩm Vita" label="Sản phẩm Vita" enabled="true" visible="true" accessible="true" x="289" y="67" width="44" height="44" index="2" traits="Button"/>
+                        <XCUIElementTypeButton type="XCUIElementTypeButton" name="Tài khoản" label="Tài khoản" enabled="true" visible="true" accessible="true" x="16" y="128" width="44" height="45" index="3" traits="Button"/>
+                      </XCUIElementTypeOther>
+                      <XCUIElementTypeOther type="XCUIElementTypeOther" enabled="true" visible="true" accessible="false" x="0" y="0" width="393" height="852" index="2" traits="">
+                        <XCUIElementTypeOther type="XCUIElementTypeOther" name="Checklist 1&#10;0/1&#10;Xong các việc ở trên là xong việc hôm nay.&#10;Tạo việc rồi chọn người nhận." label="Checklist 1&#10;0/1&#10;Xong các việc ở trên là xong việc hôm nay.&#10;Tạo việc rồi chọn người nhận." enabled="true" visible="true" accessible="true" x="16" y="174" width="361" height="678" index="0" traits=""/>
+                        <XCUIElementTypeOther type="XCUIElementTypeOther" enabled="true" visible="true" accessible="false" x="0" y="0" width="393" height="852" index="1" traits="">
+                          <XCUIElementTypeOther type="XCUIElementTypeOther" name="Vita đề xuất&#10;Còn 1 ngày tới hạn mà tiến độ mới 0%. Nộp báo cáo ngân sách gấp nhất, nên làm trước nhé." label="Vita đề xuất&#10;Còn 1 ngày tới hạn mà tiến độ mới 0%. Nộp báo cáo ngân sách gấp nhất, nên làm trước nhé." enabled="true" visible="true" accessible="true" x="16" y="200" width="361" height="201" index="0" traits=""/>
+                          <XCUIElementTypeButton type="XCUIElementTypeButton" name="Làm ngay: Nộp báo cáo ngân sách" label="Làm ngay: Nộp báo cáo ngân sách" enabled="true" visible="true" accessible="true" x="36" y="333" width="93" height="48" index="1" traits="Button"/>
+                        </XCUIElementTypeOther>
+                        <XCUIElementTypeStaticText type="XCUIElementTypeStaticText" value="Làm trước việc này" name="Làm trước việc này" label="Làm trước việc này" enabled="true" visible="true" accessible="true" x="44" y="428" width="333" height="22" index="2" traits="StaticText"/>
+                        <XCUIElementTypeStaticText type="XCUIElementTypeStaticText" value="0" name="Nộp báo cáo ngân sách&#10;Ngày mai&#10;Đang làm&#10;NT&#10;Nguyễn Thị Thu Thảo (bạn)&#10;Tiến độ 0%&#10;0%" label="Nộp báo cáo ngân sách&#10;Ngày mai&#10;Đang làm&#10;NT&#10;Nguyễn Thị Thu Thảo (bạn)&#10;Tiến độ 0%&#10;0%" enabled="true" visible="true" accessible="true" x="17" y="462" width="359" height="111" index="3" traits="StaticText"/>
+                        <XCUIElementTypeOther type="XCUIElementTypeOther" enabled="true" visible="true" accessible="false" x="0" y="0" width="393" height="852" index="4" traits="">
+                          <XCUIElementTypeOther type="XCUIElementTypeOther" name="9" label="9" enabled="true" visible="true" accessible="true" x="17" y="606" width="359" height="44" index="0" traits=""/>
+                          <XCUIElementTypeSwitch type="XCUIElementTypeSwitch" value="0" enabled="true" visible="true" accessible="true" x="33" y="616" width="24" height="24" index="1" traits="ToggleButton, Button"/>
+                          <XCUIElementTypeButton type="XCUIElementTypeButton" name="Minh chứng, sửa, xoá" label="Minh chứng, sửa, xoá" enabled="true" visible="true" accessible="true" x="328" y="606" width="44" height="44" index="2" traits="Button"/>
+                        </XCUIElementTypeOther>
+                        <XCUIElementTypeButton type="XCUIElementTypeButton" name="Gặp vướng" label="Gặp vướng" enabled="true" visible="true" accessible="true" x="33" y="654" width="158" height="40" index="5" traits="Button"/>
+                        <XCUIElementTypeButton type="XCUIElementTypeButton" name="Xong" label="Xong" enabled="true" visible="true" accessible="true" x="202" y="654" width="158" height="40" index="6" traits="Button"/>
+                        <XCUIElementTypeStaticText type="XCUIElementTypeStaticText" value="Các việc khác" name="Các việc khác" label="Các việc khác" enabled="true" visible="true" accessible="true" x="16" y="738" width="361" height="22" index="7" traits="StaticText"/>
+                        <XCUIElementTypeOther type="XCUIElementTypeOther" enabled="true" visible="true" accessible="false" x="0" y="0" width="393" height="852" index="8" traits="">
+                          <XCUIElementTypeOther type="XCUIElementTypeOther" name="Xem việc" label="Xem việc" enabled="true" visible="true" accessible="true" x="16" y="771" width="361" height="40" index="0" traits=""/>
+                          <XCUIElementTypeButton type="XCUIElementTypeButton" name="Chờ bạn nhận" label="Chờ bạn nhận" enabled="true" visible="true" accessible="true" x="20" y="775" width="177" height="32" index="1" traits="Button"/>
+                          <XCUIElementTypeButton type="XCUIElementTypeButton" value="1" name="Việc còn lại" label="Việc còn lại" enabled="true" visible="false" accessible="true" x="196" y="775" width="177" height="32" index="2" traits="Selected, Button"/>
+                        </XCUIElementTypeOther>
+                        <XCUIElementTypeStaticText type="XCUIElementTypeStaticText" value="Hôm nay không còn việc nào khác" name="Hôm nay không còn việc nào khác" label="Hôm nay không còn việc nào khác" enabled="true" visible="false" accessible="true" x="0" y="0" width="0" height="0" index="9" traits="StaticText"/>
+                        <XCUIElementTypeStaticText type="XCUIElementTypeStaticText" value="Việc bạn giao cần xử lý" name="Việc bạn giao cần xử lý" label="Việc bạn giao cần xử lý" enabled="true" visible="false" accessible="true" x="0" y="0" width="0" height="0" index="10" traits="StaticText"/>
+                      </XCUIElementTypeOther>
+                    </XCUIElementTypeOther>
+                  </XCUIElementTypeOther>
+                  <XCUIElementTypeButton type="XCUIElementTypeButton" value="1" name="Hôm nay" label="Hôm nay" enabled="true" visible="true" accessible="true" x="20" y="758" width="73" height="56" index="2" traits="Selected, Button"/>
+                  <XCUIElementTypeButton type="XCUIElementTypeButton" name="Việc" label="Việc" enabled="true" visible="true" accessible="true" x="92" y="758" width="73" height="56" index="3" traits="Button"/>
+                  <XCUIElementTypeButton type="XCUIElementTypeButton" name="Nói để tạo việc&#10;Nói để tạo việc" label="Nói để tạo việc&#10;Nói để tạo việc" enabled="true" visible="true" accessible="true" x="168" y="758" width="57" height="56" index="4" traits="Button"/>
+                  <XCUIElementTypeButton type="XCUIElementTypeButton" name="Kế hoạch" label="Kế hoạch" enabled="true" visible="true" accessible="true" x="228" y="758" width="73" height="56" index="5" traits="Button"/>
+                  <XCUIElementTypeButton type="XCUIElementTypeButton" name="Báo cáo" label="Báo cáo" enabled="true" visible="true" accessible="true" x="300" y="758" width="73" height="56" index="6" traits="Button"/>
+                </XCUIElementTypeOther>
+              </XCUIElementTypeOther>
+            </XCUIElementTypeOther>
+          </XCUIElementTypeOther>
+        </XCUIElementTypeOther>
+      </XCUIElementTypeOther>
+    </XCUIElementTypeOther>
+  </XCUIElementTypeWindow>
+</XCUIElementTypeApplication>

@@ -34,6 +34,13 @@ describe("readiness", () => {
     const r = readiness(HEALTHY, { adb: true, error: null, devices: [{ serial: "S1", state: "unauthorized", model: null }] });
     expect(r).toEqual({ ready: false, hint: 'Mở khóa điện thoại và bấm "Cho phép" gỡ lỗi USB' });
   });
+  it("accepts an iPhone without adb and asks for WebDriverAgent when it is down", () => {
+    const iphone = { serial: "U1", state: "device", model: "iPhone 15", platform: "ios" as const };
+    expect(readiness(HEALTHY, { adb: false, ios: true, error: null, devices: [iphone] }))
+      .toEqual({ ready: true, hint: null });
+    expect(readiness(HEALTHY, { adb: false, ios: true, error: null, devices: [{ ...iphone, state: "no_wda" }] }))
+      .toEqual({ ready: false, hint: "Chạy WebDriverAgent trên iPhone và chuyển cổng 8100" });
+  });
 });
 
 describe("TestbenchPanel", () => {

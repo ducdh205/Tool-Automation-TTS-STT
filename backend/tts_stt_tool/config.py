@@ -28,6 +28,8 @@ class Settings:
     wyoming_cmd: list[str] = field(default_factory=list)
     port: int = 8765
     tts_device: str = "cpu"  # "cpu" | "cuda" — VieNeu backend, switched from the test bench panel
+    # WebDriverAgent on the iPhone, forwarded by `go-ios forward 8100 8100` (see device/wda.py)
+    wda_url: str = "http://127.0.0.1:8100"
 
     def to_json(self) -> dict:
         d = asdict(self)

@@ -15,6 +15,8 @@ from fastapi.staticfiles import StaticFiles
 
 from tts_stt_tool.config import Settings
 from tts_stt_tool.device.adb import Adb
+from tts_stt_tool.device.goios import GoIos
+from tts_stt_tool.device.ios import IosHub
 from tts_stt_tool.jobs.runner import JobRunner
 from tts_stt_tool.store.db import Store
 from tts_stt_tool.stt.server_manager import REPO_ROOT, WyomingServerManager, default_wyoming_launch
@@ -42,6 +44,7 @@ class AppContext:
     wyoming_error: str | None = None
     background: set = field(default_factory=set)
     adb: Adb = field(default_factory=Adb)
+    ios: IosHub = field(default_factory=lambda: IosHub(GoIos(enabled=False)))  # iPhones (go-ios + WDA)
     device_factory: Callable[[str], Awaitable[Any]] | None = None  # serial -> DeviceDriver
     player: Any = None  # AudioPlayer
     busy_serial: str | None = None  # phone driven by a running block 2 job
@@ -55,6 +58,8 @@ class AppContext:
     async def device(self, serial: str) -> Any:
         if self.device_factory is not None:
             return await self.device_factory(serial)
+        if await self.ios.is_ios(serial):
+            return await self.ios.driver(serial)
         from tts_stt_tool.pipeline.block2 import AdbDriver
 
         return await AdbDriver.connect(self.adb, serial)
@@ -101,6 +106,7 @@ def create_app(
     device_factory: Callable[[str], Awaitable[Any]] | None = None,
     player: Any = None,
     gpu: GpuSetup | None = None,
+    ios: IosHub | None = None,
 ) -> FastAPI:
     from tts_stt_tool.api.routes import router
     from tts_stt_tool.api.ws import ws_router
@@ -122,6 +128,10 @@ def create_app(
         player=player,
         gpu=gpu or GpuSetup(),
     )
+    if ios is not None:
+        ctx.ios = ios
+    elif device_factory is None:  # tests inject a fake phone: never touch a real iPhone there
+        ctx.ios = IosHub(GoIos(), wda_url=settings.wda_url)
     if ctx.player is None:
         from tts_stt_tool.device.player import WinSoundPlayer
 

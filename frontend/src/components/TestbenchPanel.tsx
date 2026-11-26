@@ -14,6 +14,7 @@ const STATE: Record<string, { label: string; level: Level }> = {
   device: { label: "Đã kết nối", level: "ok" },
   unauthorized: { label: "Chưa cho phép", level: "warn" },
   offline: { label: "Mất kết nối", level: "warn" },
+  no_wda: { label: "Chưa chạy WDA", level: "warn" },
 };
 
 /** Ready to test = reference STT up and at least one phone connected; else the first thing to fix. */
@@ -21,10 +22,12 @@ export function readiness(health: Health | null, device: DeviceStatus | null): {
   const online = device?.devices.some((d) => d.state === "device") ?? false;
   let hint: string | null = null;
   if (!health?.wyoming) hint = "Chưa chạy STT tham chiếu — Verify sẽ không dùng được";
-  else if (device && !device.adb) hint = "Không tìm thấy adb";
+  else if (device && !device.adb && !device.ios) hint = "Không tìm thấy adb";
   else if (device && device.devices.length === 0) hint = "Cắm điện thoại qua USB và bật Gỡ lỗi USB";
   else if (device && !online && device.devices.some((d) => d.state === "unauthorized"))
     hint = 'Mở khóa điện thoại và bấm "Cho phép" gỡ lỗi USB';
+  else if (device && !online && device.devices.some((d) => d.state === "no_wda"))
+    hint = "Chạy WebDriverAgent trên iPhone và chuyển cổng 8100";
   return { ready: !!health?.wyoming && online, hint };
 }
 
@@ -125,10 +128,10 @@ export function TestbenchPanel({ health, device, jobRunning }: {
       {open && (
         <>
           <div className={`tb-badge ${ready ? "ok" : "bad"}`}>{ready ? "Sẵn sàng test" : "Chưa sẵn sàng test"}</div>
-          <Row label="Điện thoại · ADB">
+          <Row label="Điện thoại">
             {!device && <Status level="off" text="Đang kiểm tra…" />}
-            {device && !device.adb && <Status level="bad" text="Không tìm thấy adb" title={device.error ?? undefined} />}
-            {device?.adb && phones.length === 0 && <Status level="bad" text="Chưa có thiết bị" />}
+            {device && !device.adb && !device.ios && <Status level="bad" text="Không tìm thấy adb" title={device.error ?? undefined} />}
+            {(device?.adb || device?.ios) && phones.length === 0 && <Status level="bad" text="Chưa có thiết bị" />}
             {phones.map((d) => {
               const st = STATE[d.state] ?? { label: d.state, level: "warn" as Level };
               return (

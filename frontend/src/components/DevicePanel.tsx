@@ -6,6 +6,7 @@ const STATE_LABEL: Record<string, string> = {
   device: "Đã kết nối",
   unauthorized: "Chưa cho phép gỡ lỗi USB",
   offline: "Mất kết nối",
+  no_wda: "Chưa chạy WebDriverAgent",
 };
 
 function useDeviceStatus(): DeviceStatus | null {
@@ -155,6 +156,7 @@ export function DevicePanel({ jobLogs = [], profile = null, onProfileSaved }: Pr
   const current: DeviceInfo | undefined = devices.find((d) => d.serial === picked) ?? devices[0];
 
   const online = current?.state === "device";
+  const ios = current?.platform === "ios";
   const locked = !!current && status?.busy === current.serial; // a block 2 job drives this phone
   const send = async (b: DeviceInputBody) => {
     if (!current || locked) return;
@@ -198,8 +200,10 @@ export function DevicePanel({ jobLogs = [], profile = null, onProfileSaved }: Pr
 
   let screen;
   if (!status) screen = <Empty title="Đang kiểm tra thiết bị…" hint="" />;
-  else if (!status.adb) screen = <Empty title="Không tìm thấy adb" hint="Đặt Android platform-tools vào vendor/platform-tools." />;
+  else if (!status.adb && !status.ios) screen = <Empty title="Không tìm thấy adb" hint="Đặt Android platform-tools vào vendor/platform-tools." />;
   else if (!current) screen = <Empty title="Chưa kết nối thiết bị" hint="Cắm cáp USB và bật Gỡ lỗi USB trong Tùy chọn nhà phát triển." />;
+  else if (current.state === "no_wda")
+    screen = <Empty title="Chưa chạy WebDriverAgent" hint="Chạy WebDriverAgent trên iPhone và chuyển cổng 8100 (ios.exe forward 8100 8100)." />;
   else if (current.state === "unauthorized")
     screen = <Empty title="Chờ cho phép trên điện thoại" hint="Mở khóa điện thoại và bấm “Cho phép” gỡ lỗi USB." />;
   else if (current.state !== "device") screen = <Empty title={STATE_LABEL[current.state] ?? current.state} hint="Thử rút ra cắm lại cáp." />;
@@ -220,7 +224,7 @@ export function DevicePanel({ jobLogs = [], profile = null, onProfileSaved }: Pr
           {devices.map((d) => <option key={d.serial} value={d.serial}>{d.model ?? d.serial}</option>)}
         </select>
       ) : current ? (
-        <div className="muted small">{current.model ?? "Android"} · {current.serial}</div>
+        <div className="muted small">{current.model ?? (ios ? "iPhone" : "Android")} · {current.serial}</div>
       ) : null}
       <div className="phone">
         <div className="phone-screen">{screen}</div>
@@ -254,11 +258,11 @@ export function DevicePanel({ jobLogs = [], profile = null, onProfileSaved }: Pr
           <div className="device-keys">
             <button className="btn" title="Quay lại" aria-label="Quay lại" onClick={() => key("back")}><Icon name="back" /></button>
             <button className="btn" title="Màn hình chính" aria-label="Màn hình chính" onClick={() => key("home")}><Icon name="home" /></button>
-            <button className="btn" title="Đa nhiệm" aria-label="Đa nhiệm" onClick={() => key("recents")}><Icon name="recents" /></button>
+            {!ios && <button className="btn" title="Đa nhiệm" aria-label="Đa nhiệm" onClick={() => key("recents")}><Icon name="recents" /></button>}
             <span className="divider" />
             <button className="btn" title="Giảm âm lượng" aria-label="Giảm âm lượng" onClick={() => key("voldown")}><Icon name="volDown" /></button>
             <button className="btn" title="Tăng âm lượng" aria-label="Tăng âm lượng" onClick={() => key("volup")}><Icon name="volUp" /></button>
-            <button className="btn" title="Nút nguồn (tắt/bật màn hình)" aria-label="Nút nguồn" onClick={() => key("power")}><Icon name="power" /></button>
+            {!ios && <button className="btn" title="Nút nguồn (tắt/bật màn hình)" aria-label="Nút nguồn" onClick={() => key("power")}><Icon name="power" /></button>}
           </div>
           <form
             className="device-text"
@@ -268,7 +272,7 @@ export function DevicePanel({ jobLogs = [], profile = null, onProfileSaved }: Pr
               else key("enter");
             }}
           >
-            <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Gõ chữ không dấu, Enter để gửi" />
+            <input value={text} onChange={(e) => setText(e.target.value)} placeholder={ios ? "Gõ chữ (có dấu), Enter để gửi" : "Gõ chữ không dấu, Enter để gửi"} />
             <button className="btn" type="button" title="Xoá 1 ký tự" aria-label="Xoá 1 ký tự" onClick={() => key("del")}><Icon name="backspace" /></button>
           </form>
         </div>

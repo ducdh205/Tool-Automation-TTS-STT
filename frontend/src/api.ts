@@ -39,14 +39,15 @@ export interface Settings {
 export interface Health { wyoming: boolean; wyoming_error: string | null; gpu: boolean; job: Job | null }
 export interface Job { id: string; name: string; done: number; total: number }
 export interface Voice { id: string; label: string }
-export interface DeviceInfo { serial: string; state: string; model: string | null }
+/** state: device | unauthorized | offline (Android) · no_wda (iPhone seen, WebDriverAgent not answering). */
+export interface DeviceInfo { serial: string; state: string; model: string | null; platform?: "android" | "ios" }
 export type DeviceKey = "back" | "home" | "recents" | "enter" | "del" | "power" | "volup" | "voldown";
 export type DeviceInputBody =
   | { action: "tap"; x: number; y: number }
   | { action: "swipe"; x: number; y: number; x2: number; y2: number; duration_ms?: number }
   | { action: "key"; key: DeviceKey }
   | { action: "text"; text: string };
-export interface DeviceStatus { adb: boolean; error: string | null; devices: DeviceInfo[]; busy?: string | null }
+export interface DeviceStatus { adb: boolean; ios?: boolean; error: string | null; devices: DeviceInfo[]; busy?: string | null }
 export type TtsDeviceKind = "cpu" | "cuda";
 export interface CudaInstall { state: "idle" | "running" | "done" | "failed"; log_tail: string[]; error: string | null }
 /** GET /api/tts/device: chosen and loaded TTS device, NVIDIA / PyTorch CUDA probe, installer state. */

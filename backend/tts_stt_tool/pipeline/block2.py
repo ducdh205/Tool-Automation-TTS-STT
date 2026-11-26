@@ -110,7 +110,7 @@ async def _wait_for(dev: DeviceDriver, label: str, timeout_s: float, sleep: Slee
 
 async def _tap(dev: DeviceDriver, node: UiNode, log: list[str]) -> None:
     x, y = node.center
-    log.append(f"Bấm '{node.label}' ({x},{y})")
+    log.append(f"Bấm '{node.label.split(chr(10), 1)[0]}' ({x},{y})")  # iOS repeats labels on a 2nd line
     await dev.tap(x, y)
 
 
@@ -159,6 +159,12 @@ async def _wait_mic(dev: DeviceDriver, p: AppProfile, log: list[str], sleep: Sle
     deadline = loop.time() + p.listen_timeout_s
     for n in range(max(1, int(p.listen_timeout_s / MIC_POLL_S))):
         state = await dev.mic_active()
+        if state is None and getattr(dev, "fast_ui", False):
+            # iPhone: no system mic state, but a UI dump is cheap -> wait for the stop button.
+            if await _wait_for(dev, p.stop_label, p.listen_timeout_s, sleep) is None:
+                raise OperationError(f"Mic không bật sau {p.listen_timeout_s:g}s (không thấy nút '{p.stop_label}')")
+            log.append(f"Mic đã bật (thấy nút '{p.stop_label}')")
+            return
         if state is None:
             log.append("Không đọc được trạng thái mic, chờ cố định")
             await sleep(1.0)

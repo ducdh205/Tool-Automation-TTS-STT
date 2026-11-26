@@ -19,8 +19,10 @@ from starlette.background import BackgroundTask
 from tts_stt_tool.api.app import AppContext
 from tts_stt_tool.config import save_settings
 from tts_stt_tool.device.adb import KEYS, AdbError
+from tts_stt_tool.device.goios import GoIosError
+from tts_stt_tool.device.wda import WdaError
 from tts_stt_tool.device.profile import AppProfile, get_profile, list_profiles, save_profile
-from tts_stt_tool.device.ui_tree import node_at, parse_dump
+from tts_stt_tool.device.ui_tree import UiNode, node_at, parse_dump
 from tts_stt_tool.input.filters import clean_text, has_words
 from tts_stt_tool.input.generic import ColumnMapping, preview_sheet, read_items, sheet_names
 from tts_stt_tool.input.testcase_form import InputError
@@ -440,6 +442,7 @@ class SettingsIn(BaseModel):
     stt_timeout_s: float = Field(gt=0, le=600)
     wyoming_cmd: list[str] = []
     port: int = Field(ge=1, le=65535)
+    wda_url: str = Field(default="http://127.0.0.1:8100", pattern=r"^https?://")  # read at startup
     # Echoed back by the settings form; ignored here — CPU/GPU changes go through PUT /api/tts/device,
     # which checks CUDA first.
     tts_device: str | None = None
@@ -546,24 +549,40 @@ async def install_cuda(request: Request) -> dict[str, Any]:
 
 
 # -- device -------------------------------------------------------------------
+DEVICE_ERRORS = (AdbError, WdaError, GoIosError)
+
+
+async def _is_ios(ctx: AppContext, serial: str) -> bool:
+    return ctx.device_factory is None and await ctx.ios.is_ios(serial)
+
+
 @router.get("/device")
 async def device_status(request: Request) -> dict[str, Any]:
+    """Android phones (adb) and iPhones (go-ios + WebDriverAgent), each with its ``platform``."""
     ctx = ctx_of(request)
-    adb = ctx.adb
-    if not adb.available:
-        return {"adb": False, "error": "Không tìm thấy adb", "devices": [], "busy": ctx.busy_serial}
-    try:
-        devices = await adb.devices()
-    except AdbError as e:
-        return {"adb": True, "error": str(e), "devices": [], "busy": ctx.busy_serial}
-    return {"adb": True, "error": None, "devices": [d.to_json() for d in devices], "busy": ctx.busy_serial}
+    adb, errors, devices = ctx.adb, [], []
+    if adb.available:
+        try:
+            devices += [d.to_json() | {"platform": "android"} for d in await adb.devices()]
+        except AdbError as e:
+            errors.append(str(e))
+    if ctx.ios.available:
+        try:
+            devices += await ctx.ios.devices()
+        except DEVICE_ERRORS as e:
+            errors.append(f"iPhone: {e}")
+    if not adb.available and not ctx.ios.available:
+        errors.append("Không tìm thấy adb")
+    return {"adb": adb.available, "ios": ctx.ios.available, "error": "; ".join(errors) or None,
+            "devices": devices, "busy": ctx.busy_serial}
 
 
 @router.get("/device/{serial}/screen")
 async def device_screen(request: Request, serial: str) -> Response:
+    ctx = ctx_of(request)
     try:
-        png = await ctx_of(request).adb.screencap(serial)
-    except AdbError as e:
+        png = await (ctx.ios.screencap(serial) if await _is_ios(ctx, serial) else ctx.adb.screencap(serial))
+    except DEVICE_ERRORS as e:
         raise HTTPException(503, str(e)) from e
     return Response(png, media_type="image/png", headers={"Cache-Control": "no-store"})
 
@@ -582,41 +601,75 @@ class DeviceInput(BaseModel):
 
 @router.post("/device/{serial}/input")
 async def device_input(request: Request, serial: str, body: DeviceInput) -> dict[str, bool]:
-    _require_free(ctx_of(request), serial)
-    adb = ctx_of(request).adb
+    """Coordinates are screenshot pixels (an iPhone converts them to points)."""
+    ctx = ctx_of(request)
+    _require_free(ctx, serial)
+    if body.action in ("tap", "swipe") and None in (body.x, body.y):
+        raise HTTPException(422, "Thiếu toạ độ")
+    if body.action == "swipe" and None in (body.x2, body.y2):
+        raise HTTPException(422, "Thiếu toạ độ")
+    if body.action == "key" and body.key not in KEYS:
+        raise HTTPException(422, "Phím không hỗ trợ")
+    if body.action == "text" and not body.text:
+        raise HTTPException(422, "Thiếu nội dung")
     try:
+        if await _is_ios(ctx, serial):
+            ios = ctx.ios
+            if body.action == "tap":
+                await ios.tap_px(serial, body.x, body.y)  # type: ignore[arg-type]
+            elif body.action == "swipe":
+                await ios.swipe_px(serial, body.x, body.y, body.x2, body.y2, body.duration_ms)  # type: ignore[arg-type]
+            elif body.action == "key":
+                await (await ios.driver(serial)).key(body.key)  # type: ignore[arg-type]
+            else:
+                await (await ios.driver(serial)).text(body.text)  # type: ignore[arg-type]
+            return {"ok": True}
+        adb = ctx.adb
         if body.action == "tap":
-            if body.x is None or body.y is None:
-                raise HTTPException(422, "Thiếu toạ độ")
-            await adb.tap(serial, body.x, body.y)
+            await adb.tap(serial, body.x, body.y)  # type: ignore[arg-type]
         elif body.action == "swipe":
-            if None in (body.x, body.y, body.x2, body.y2):
-                raise HTTPException(422, "Thiếu toạ độ")
-            await adb.swipe(serial, body.x, body.y, body.x2, body.y2, body.duration_ms)
+            await adb.swipe(serial, body.x, body.y, body.x2, body.y2, body.duration_ms)  # type: ignore[arg-type]
         elif body.action == "key":
-            if body.key not in KEYS:
-                raise HTTPException(422, "Phím không hỗ trợ")
-            await adb.key(serial, KEYS[body.key])
+            await adb.key(serial, KEYS[body.key])  # type: ignore[index]
         else:
-            if not body.text:
-                raise HTTPException(422, "Thiếu nội dung")
-            await adb.text(serial, body.text)
-    except AdbError as e:
+            await adb.text(serial, body.text)  # type: ignore[arg-type]
+    except DEVICE_ERRORS as e:
         raise HTTPException(503, str(e)) from e
     return {"ok": True}
 
 
 @router.get("/device/{serial}/node-at")
 async def device_node_at(request: Request, serial: str, x: int, y: int) -> dict[str, Any]:
-    _require_free(ctx_of(request), serial)
+    ctx = ctx_of(request)
+    _require_free(ctx, serial)
     try:
-        nodes = parse_dump(await ctx_of(request).adb.dump_ui(serial))
-    except AdbError as e:
+        if await _is_ios(ctx, serial):
+            nodes, scale = await ctx.ios.nodes_px(serial)
+            nodes = [UiNode(n.text, n.desc, n.cls, tuple(round(v * scale) for v in n.bounds), n.clickable)  # type: ignore[misc]
+                     for n in nodes]
+        else:
+            nodes = parse_dump(await ctx.adb.dump_ui(serial))
+    except DEVICE_ERRORS as e:
         raise HTTPException(503, str(e)) from e
     node = node_at(nodes, x, y)
     if node is None:
         raise HTTPException(404, "Không có phần tử nào tại điểm này")
     return node.to_json()
+
+
+async def _device_model_version(ctx: AppContext, serial: str, package: str) -> tuple[str | None, str | None]:
+    """Phone name and app version for the run record (best effort)."""
+    if ctx.device_factory is not None:
+        return None, None
+    try:
+        if await ctx.ios.is_ios(serial):
+            return await ctx.ios.model(serial), await ctx.ios.app_version(serial, package)
+        if ctx.adb.available:
+            model = next((d.model for d in await ctx.adb.devices() if d.serial == serial), None)
+            return model, await ctx.adb.app_version(serial, package)
+    except DEVICE_ERRORS:
+        pass
+    return None, None
 
 
 # -- block 2 ------------------------------------------------------------------
@@ -689,13 +742,7 @@ async def create_app_run(request: Request, set_id: int, body: AppRunIn) -> dict[
         raise HTTPException(409, f"Đang chạy: {ctx.runner.current()['name']}")
     if not ctx.store.count_with_audio(set_id):
         raise HTTPException(422, "Bộ audio chưa có câu nào có audio — sinh audio ở Khối 1 trước")
-    model = version = None
-    if ctx.device_factory is None and ctx.adb.available:
-        try:
-            model = next((d.model for d in await ctx.adb.devices() if d.serial == body.serial), None)
-            version = await ctx.adb.app_version(body.serial, profile.package)
-        except AdbError:
-            pass
+    model, version = await _device_model_version(ctx, body.serial, profile.package)
     run_id = ctx.store.create_app_run(set_id, body.serial, model, profile.name, version, item_ids=body.item_ids)
     if not ctx.store.app_results(run_id):
         ctx.store.delete_app_run(run_id)
@@ -733,11 +780,8 @@ async def rerun_app_run(request: Request, run_id: int, body: RerunIn) -> dict[st
     if body.serial != run["serial"]:
         raise HTTPException(409, f"Lần test #{run_id} chạy trên máy {run['device_model'] or run['serial']}"
                                  " — chọn máy đó, hoặc tạo lần test mới")
-    if ctx.device_factory is None and ctx.adb.available and run["app_version"]:
-        try:
-            version = await ctx.adb.app_version(body.serial, profile.package)
-        except AdbError:
-            version = None
+    if run["app_version"]:
+        _, version = await _device_model_version(ctx, body.serial, profile.package)
         if version and version != run["app_version"]:
             raise HTTPException(409, f"App đã đổi phiên bản ({run['app_version']} → {version})"
                                      f" so với lần test #{run_id} — tạo lần test mới")

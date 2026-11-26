@@ -249,3 +249,51 @@ async def test_heard_prefix_off_falls_back_to_bubbles():
     app = FakeApp()
     cap = await run_one(app, AppProfile(heard_prefix=""), WAV, app, sleep=no_sleep)
     assert cap.text == "chỉnh nhiệt độ ghế lái lên 24 độ"
+
+
+# --- iPhone: no mic state, a fast UI dump --------------------------------------
+class FakeIosApp(FakeApp):
+    """iOS: ``mic_active`` is unknown; "Dừng nghe" shows once the mic is live (after N dumps)."""
+
+    fast_ui = True
+
+    def __init__(self, *a, live_after_dumps: int = 2, **kw):
+        super().__init__(*a, **kw)
+        self.live_after_dumps = live_after_dumps
+        self.listen_dumps = 0
+
+    async def nodes(self):
+        if self.state == "listening" and not self._mic_live:
+            self.listen_dumps += 1
+            if self.listen_dumps >= self.live_after_dumps:
+                self._mic_live = True
+        return await super().nodes()
+
+    def _sheet_nodes(self):
+        out = super()._sheet_nodes()
+        if self.state == "listening" and not self._mic_live:
+            out = [n for n in out if n.label != "Dừng nghe"]
+        return out
+
+    async def tap(self, x, y):
+        await super().tap(x, y)
+        if self.state == "listening":
+            self._mic_live, self.listen_dumps = False, 0
+
+    async def mic_active(self):
+        return None
+
+
+async def test_ios_waits_for_stop_button_before_playing():
+    app = FakeIosApp(live_after_dumps=3)
+    cap = await one(app)
+    assert app.played == [WAV]  # played only once "Dừng nghe" was on screen
+    assert cap.text == "chỉnh nhiệt độ ghế lái lên 24 độ"
+    assert app.taps == ["Nói để tạo việc", "Dừng nghe", "BACK"]
+
+
+async def test_ios_stop_button_never_shows():
+    app = FakeIosApp(live_after_dumps=10**6)
+    with pytest.raises(OperationError, match="[Mm]ic"):
+        await one(app)
+    assert app.played == []

@@ -9,7 +9,11 @@ from dataclasses import dataclass
 
 _BOUNDS = re.compile(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]")
 _EDIT = "android.widget.EditText"
-_NOT_BUBBLE = ("android.widget.Button", _EDIT, "android.widget.ImageView")
+_IOS_INPUTS = ("XCUIElementTypeTextField", "XCUIElementTypeTextView", "XCUIElementTypeSecureTextField",
+               "XCUIElementTypeSearchField")
+# iOS "Other" views are containers whose label repeats their children's text.
+_NOT_BUBBLE = ("android.widget.Button", _EDIT, "android.widget.ImageView",
+               "XCUIElementTypeButton", "XCUIElementTypeImage", "XCUIElementTypeOther", *_IOS_INPUTS)
 # Input character counter ("Còn lại 1.000 ký tự"). The 2026-11 listening sheet has no EditText,
 # so the counter cannot be ruled out by sitting inside the input box.
 _COUNTER = re.compile(r"^Còn lại [\d.,]+ ký tự$")
@@ -58,6 +62,39 @@ def parse_dump(xml: str) -> list[UiNode]:
             continue
         b = (int(m[1]), int(m[2]), int(m[3]), int(m[4]))
         out.append(UiNode(text, desc, cls, b, el.get("clickable") == "true"))
+    return out
+
+
+_IOS_SKIP = ("XCUIElementTypeApplication", "XCUIElementTypeWindow")
+
+
+def parse_wda_source(xml: str) -> list[UiNode]:
+    """Parse WebDriverAgent ``/source`` XML (iOS); bounds are in points, like WDA taps.
+
+    The text of a view is its accessibility ``label`` (``name`` if empty; a StaticText's ``value``
+    as a last resort). Hidden views (``visible="false"`` or zero size) are dropped. A text field's
+    ``value`` is what is being typed / dictated, not its label, so it is ignored here.
+    """
+    root = ET.fromstring(xml[xml.index("<"):])
+    out: list[UiNode] = []
+    for el in root.iter():
+        cls = el.get("type") or el.tag
+        if not cls.startswith("XCUIElementType") or cls in _IOS_SKIP or el.get("visible") == "false":
+            continue
+        try:
+            x, y, w, h = (int(float(el.get(k, "0"))) for k in ("x", "y", "width", "height"))
+        except ValueError:
+            continue
+        if w <= 0 or h <= 0:
+            continue
+        text = el.get("label") or el.get("name") or ""
+        if not text and cls == "XCUIElementTypeStaticText":
+            text = el.get("value") or ""
+        text = _nfc(text)
+        if not (text or cls in _IOS_INPUTS):
+            continue
+        clickable = cls == "XCUIElementTypeButton" or "Button" in (el.get("traits") or "")
+        out.append(UiNode(text, "", cls, (x, y, x + w, y + h), clickable))
     return out
 
 
