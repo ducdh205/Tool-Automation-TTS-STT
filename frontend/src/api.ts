@@ -78,6 +78,12 @@ export interface AppResult {
   id: number; app_run_id: number; item_id: number; status: AppStatus; app_text: string | null;
   wer: number | null; cer: number | null; ops: WordOp[]; error: string | null; log: string | null;
   verify?: VerifyStatus;
+  /** Earlier attempts of this case in the same run (it was run again), newest first. */
+  history?: AppAttempt[];
+}
+export interface AppAttempt {
+  status: AppStatus; app_text: string | null; wer: number | null; cer: number | null; error: string | null;
+  updated_at: string | null;
 }
 export interface UiNodeInfo { label: string; cls: string; bounds: number[]; clickable: boolean }
 
@@ -176,6 +182,9 @@ export const api = {
     a.click();
   },
   resumeAppRun: (runId: number) => req<{ job_id: string }>("POST", `/api/app-runs/${runId}/resume`),
+  /** Run the picked cases again inside this run: its other results stay. */
+  rerunAppRun: (runId: number, serial: string, itemIds: number[]) =>
+    req<{ job_id: string }>("POST", `/api/app-runs/${runId}/rerun`, { serial, item_ids: itemIds }),
   nodeAt: (serial: string, x: number, y: number) =>
     req<UiNodeInfo>("GET", `/api/device/${encodeURIComponent(serial)}/node-at?x=${x}&y=${y}`),
   audioUrl: (itemId: number, version = "") => `/api/items/${itemId}/audio${version ? `?v=${version}` : ""}`,

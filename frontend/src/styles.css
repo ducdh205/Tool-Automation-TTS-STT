@@ -111,12 +111,12 @@ nav { display: flex; flex-direction: column; gap: 2px; }
 .set-item.active { background: var(--accent-soft); color: var(--accent); }
 /* Delete sits where the sentence count is and replaces it while the row is hovered / focused. */
 .set-row { position: relative; display: flex; flex-direction: column; }
-.set-delete { position: absolute; top: 2px; right: 4px; color: var(--muted); opacity: 0; }
+.set-row .set-delete, .set-row .set-delete:disabled { position: absolute; top: 2px; right: 4px; color: var(--muted); opacity: 0; }
 .set-delete:hover:not(:disabled) { color: var(--bad); background: var(--bad-soft); }
 .set-row:hover .set-delete, .set-delete:focus-visible { opacity: 1; }
 .set-row:hover .set-delete:disabled { opacity: .4; }
 .set-row:hover:has(.set-delete) .set-line small, .set-row:has(.set-delete:focus-visible) .set-line small { visibility: hidden; }
-.set-export { position: absolute; top: 2px; right: 30px; color: var(--muted); opacity: 0; }
+.set-row .set-export, .set-row .set-export:disabled { position: absolute; top: 2px; right: 30px; color: var(--muted); opacity: 0; }
 .set-export:hover:not(:disabled) { color: var(--accent); background: var(--accent-soft); }
 .set-row:hover .set-export, .set-export:focus-visible { opacity: 1; }
 .set-row:hover .set-export:disabled { opacity: .4; }

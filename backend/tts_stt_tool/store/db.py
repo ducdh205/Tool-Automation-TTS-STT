@@ -92,7 +92,18 @@ CREATE TABLE IF NOT EXISTS app_results (
     text_tts_snap TEXT, audio_snap TEXT, screenshot_path TEXT
 );
 CREATE INDEX IF NOT EXISTS ix_app_results_run ON app_results(app_run_id, id);
+CREATE TABLE IF NOT EXISTS app_attempts (
+    id INTEGER PRIMARY KEY,
+    app_result_id INTEGER NOT NULL REFERENCES app_results(id) ON DELETE CASCADE,
+    status TEXT NOT NULL,
+    app_text TEXT, wer REAL, cer REAL, ops_json TEXT, error TEXT, log TEXT, screenshot_path TEXT,
+    text_tts_snap TEXT, audio_snap TEXT, updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_app_attempts_result ON app_attempts(app_result_id, id);
 """
+
+# what a finished result keeps when it is run again (``rerun_app_results``)
+_ATTEMPT_COLS = "status, app_text, wer, cer, ops_json, error, log, screenshot_path, text_tts_snap, audio_snap, updated_at"
 
 _RESULT_SELECT = (
     # text/audio as they were when the run was created: later edits must not change what was tested
@@ -225,7 +236,10 @@ class Store:
         """
         used = ("SELECT audio_path p, audio_set_id s FROM items WHERE audio_path IS NOT NULL"
                 " UNION ALL SELECT r.audio_snap, a.audio_set_id FROM app_results r"
-                " JOIN app_runs a ON a.id = r.app_run_id WHERE r.audio_snap IS NOT NULL")
+                " JOIN app_runs a ON a.id = r.app_run_id WHERE r.audio_snap IS NOT NULL"
+                " UNION ALL SELECT t.audio_snap, a.audio_set_id FROM app_attempts t"
+                " JOIN app_results r ON r.id = t.app_result_id JOIN app_runs a ON a.id = r.app_run_id"
+                " WHERE t.audio_snap IS NOT NULL")
         with self._conn() as c:
             if c.execute("SELECT 1 FROM audio_sets WHERE id=?", (audio_set_id,)).fetchone() is None:
                 return None
@@ -444,15 +458,72 @@ class Store:
             rows = c.execute("SELECT * FROM app_runs WHERE audio_set_id=? ORDER BY id DESC", (audio_set_id,)).fetchall()
         return [{**dict(r), "summary": self.app_summary(r["id"])} for r in rows]
 
+    def rerun_app_results(self, run_id: int, item_ids: list[int]) -> int:
+        """Queue ``item_ids`` again in this run; every other result of the run stays as it is.
+
+        A finished result moves to ``app_attempts`` (shown as its ``history``) and its row goes back
+        to "Chờ" with the item's current text and audio. Picked rows with audio that the run did
+        not test yet are added. Rows without audio, or of another set, are ignored. Returns how
+        many rows are now waiting.
+        """
+        if not item_ids:
+            return 0
+        marks = ",".join("?" * len(item_ids))
+        with self._conn() as c:
+            run = c.execute("SELECT audio_set_id FROM app_runs WHERE id=?", (run_id,)).fetchone()
+            if run is None:
+                return 0
+            playable = (f"SELECT id FROM items WHERE audio_set_id=? AND {_HAS_AUDIO} AND id IN ({marks})")
+            p_args = [run["audio_set_id"], ItemStatus.SKIPPED.value, *item_ids]
+            c.execute(
+                f"INSERT INTO app_attempts(app_result_id, {_ATTEMPT_COLS})"
+                f" SELECT id, {_ATTEMPT_COLS} FROM app_results"
+                f" WHERE app_run_id=? AND status<>? AND item_id IN ({playable}) ORDER BY id",
+                (run_id, AppStatus.PENDING.value, *p_args),
+            )
+            reset = c.execute(
+                "UPDATE app_results SET status=?, app_text=NULL, wer=NULL, cer=NULL, ops_json=NULL, error=NULL,"
+                " log=NULL, screenshot_path=NULL, updated_at=?,"
+                " text_tts_snap=(SELECT text_tts FROM items WHERE items.id=app_results.item_id),"
+                " audio_snap=(SELECT audio_path FROM items WHERE items.id=app_results.item_id)"
+                f" WHERE app_run_id=? AND item_id IN ({playable})",
+                (AppStatus.PENDING.value, _now(), run_id, *p_args),
+            ).rowcount
+            added = c.execute(
+                "INSERT INTO app_results(app_run_id, item_id, status, updated_at, text_tts_snap, audio_snap)"
+                f" SELECT ?, id, ?, ?, text_tts, audio_path FROM items WHERE id IN ({playable})"
+                " AND id NOT IN (SELECT item_id FROM app_results WHERE app_run_id=?) ORDER BY id",
+                (run_id, AppStatus.PENDING.value, _now(), *p_args, run_id),
+            ).rowcount
+            return reset + added
+
+    def _with_history(self, c: sqlite3.Connection, rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
+        out = [_item_row(r) for r in rows]
+        if not out:
+            return out
+        by_id = {d["id"]: d for d in out}
+        for d in out:
+            d["history"] = []
+        marks = ",".join("?" * len(by_id))
+        for t in c.execute(
+            f"SELECT * FROM app_attempts WHERE app_result_id IN ({marks}) ORDER BY id DESC", list(by_id)
+        ):
+            h = dict(t)
+            h["ops"] = json.loads(h.pop("ops_json")) if h.get("ops_json") else []
+            h["text_tts"], h["audio_path"] = h.pop("text_tts_snap"), h.pop("audio_snap")
+            by_id[h.pop("app_result_id")]["history"].append(h)
+        return out
+
     def app_results(self, run_id: int) -> list[dict[str, Any]]:
+        """Results of a run; each carries ``history``: its earlier attempts, newest first."""
         with self._conn() as c:
             rows = c.execute(_RESULT_SELECT + " WHERE r.app_run_id=? ORDER BY r.id", (run_id,)).fetchall()
-        return [_item_row(r) for r in rows]
+            return self._with_history(c, rows)
 
     def get_app_result(self, result_id: int) -> dict[str, Any] | None:
         with self._conn() as c:
             r = c.execute(_RESULT_SELECT + " WHERE r.id=?", (result_id,)).fetchone()
-        return _item_row(r) if r else None
+            return self._with_history(c, [r])[0] if r else None
 
     def pending_for_block2(self, run_id: int) -> list[dict[str, Any]]:
         return [r for r in self.app_results(run_id) if r["status"] in (AppStatus.PENDING.value, AppStatus.OP_ERROR.value)]

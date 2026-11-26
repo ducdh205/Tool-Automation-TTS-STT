@@ -242,6 +242,18 @@ export default function App() {
     }
   };
 
+  const rerunApp = async (runId: number, serial: string) => {
+    if (setId === null || !sel2.ids.size) return;
+    try {
+      setJobLogs([]);
+      const r = await api.rerunAppRun(runId, serial, [...sel2.ids]);
+      setJob(jobAfterStart(r.job_id, finishedJobs.current));
+      await Promise.all([loadAppRuns(setId, runId), loadAppResults(runId)]);
+    } catch (e) {
+      notifyError(e);
+    }
+  };
+
   const resumeApp = async (runId: number) => {
     try {
       const r = await api.resumeAppRun(runId);
@@ -454,6 +466,7 @@ export default function App() {
             onStart={startApp}
             onSaveProfile={saveProfile}
             onResume={resumeApp}
+            onRerun={rerunApp}
             onSelectRun={setAppRunId}
           />
           )}

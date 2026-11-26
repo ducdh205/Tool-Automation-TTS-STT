@@ -40,11 +40,50 @@ describe("AppRunPanel", () => {
     fireEvent.click(screen.getByText("Chạy tiếp (1)"));
     expect(onResume).toHaveBeenCalledWith(7);
   });
+  it("lists the 5 newest runs and the rest behind 'Xem thêm'", () => {
+    const runs = [9, 8, 7, 6, 5, 4, 3].map((id) => ({ ...run, id }));
+    const onSelectRun = vi.fn();
+    render(<AppRunPanel {...panel({ runs, runId: 9, onSelectRun })} />);
+    const select = screen.getByRole("combobox", { name: "Lần test" });
+    const ids = () => Array.from(select.querySelectorAll("option")).map((o) => o.textContent!.split(" ")[0]);
+    expect(ids()).toEqual(["#9", "#8", "#7", "#6", "#5", "Xem"]);
+    fireEvent.change(select, { target: { value: "__more__" } });
+    expect(onSelectRun).not.toHaveBeenCalled();
+    expect(ids()).toEqual(["#9", "#8", "#7", "#6", "#5", "#4", "#3"]);
+    fireEvent.change(select, { target: { value: "3" } });
+    expect(onSelectRun).toHaveBeenCalledWith(3);
+  });
+  it("keeps an older selected run listed", () => {
+    const runs = [9, 8, 7, 6, 5, 4, 3].map((id) => ({ ...run, id }));
+    render(<AppRunPanel {...panel({ runs, runId: 3 })} />);
+    const opts = Array.from(screen.getByRole("combobox", { name: "Lần test" }).querySelectorAll("option"));
+    expect(opts.map((o) => o.textContent!.split(" ")[0])).toEqual(["#9", "#8", "#7", "#6", "#5", "#3", "Xem"]);
+    expect(opts[6].textContent).toContain("1 lần test cũ hơn");
+  });
   it("run label follows the selection", () => {
     const onStart = vi.fn();
     render(<AppRunPanel {...panel({ selectedCount: 3, onStart })} />);
     fireEvent.click(screen.getByText("Chạy trên app (3)"));
     expect(onStart).toHaveBeenCalledWith("S", "Vita Work (dev)");
+  });
+  it("picked cases with a run shown are run again inside that run", () => {
+    const onRerun = vi.fn();
+    const onStart = vi.fn();
+    render(<AppRunPanel {...panel({ runs: [run], runId: 7, selectedCount: 2, onRerun, onStart })} />);
+    fireEvent.click(screen.getByText("Chạy lại (2) vào #7"));
+    expect(onRerun).toHaveBeenCalledWith(7, "S");
+    fireEvent.click(screen.getByText("Lần test mới (2)"));
+    expect(onStart).toHaveBeenCalledWith("S", "Vita Work (dev)");
+  });
+  it("no re-run into a run made on another phone", () => {
+    render(<AppRunPanel {...panel({ runs: [{ ...run, serial: "X" }], runId: 7, selectedCount: 2, onRerun: () => {} })} />);
+    expect((screen.getByText("Chạy lại (2) vào #7") as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByText("Lần test mới (2)") as HTMLButtonElement).disabled).toBe(false);
+  });
+  it("without a pick there is no re-run button", () => {
+    render(<AppRunPanel {...panel({ runs: [run], runId: 7, onRerun: () => {} })} />);
+    expect(screen.queryByText(/Chạy lại/)).toBeNull();
+    expect(screen.getByText("Chạy trên app (tất cả)")).toBeTruthy();
   });
   it("export buttons need a selected run", () => {
     const onExportForm = vi.fn();

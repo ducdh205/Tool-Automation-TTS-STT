@@ -19,12 +19,16 @@ interface Props {
   onExportForm: () => void;
   onExportZip: () => void;
   onResume: (runId: number) => void;
+  /** Runs the picked cases again inside the selected run (its other results stay). */
+  onRerun?: (runId: number, serial: string) => void;
   onSelectRun: (runId: number | null) => void;
 }
 
 /** Same upper bound as the backend (ProfileIn.between_delay_s). */
 const MAX_GAP_S = 60;
 
+const RECENT_RUNS = 5;
+const MORE = "__more__";
 const runLabel = (r: AppRun) => `#${r.id} · ${r.device_model ?? r.serial} · ${r.created_at.slice(5, 16).replace("T", " ")}`;
 
 /** Step 2 actions, rendered inside the RunBar toolbar: start a run on the left, past runs and exports on the right. */
@@ -57,6 +61,14 @@ export function AppRunPanel(p: Props) {
   const run = p.runs.find((r) => r.id === p.runId);
   const pending = run ? (run.summary["Chờ"] ?? 0) + (run.summary["Lỗi thao tác"] ?? 0) : 0;
   const canStart = !!serial && !!profile && !p.busy && p.readyCount > 0;
+  // Picking cases while a run is shown means "run these again": keep them in that run.
+  const rerun = !!run && p.selectedCount > 0 && !!p.onRerun;
+  const samePhone = !!run && run.serial === serial;
+
+  // Past runs: only the newest few until asked for more; the selected run always stays listed.
+  const [showAllRuns, setShowAllRuns] = useState(false);
+  const shownRuns = showAllRuns ? p.runs : p.runs.filter((r, i) => i < RECENT_RUNS || r.id === p.runId);
+  const hiddenRuns = p.runs.length - shownRuns.length;
 
   return (
     <>
@@ -84,9 +96,18 @@ export function AppRunPanel(p: Props) {
           <span>s</span>
         </label>
       )}
-      <button className="btn primary" disabled={!canStart} onClick={() => p.onStart(serial, profile)}
-        title={p.readyCount ? "" : "Sinh audio ở Khối 1 trước"}>
-        <Icon name="play" />Chạy trên app ({p.selectedCount || "tất cả"})
+      {rerun && run && (
+        <button className="btn primary" disabled={!canStart || !samePhone}
+          onClick={() => p.onRerun?.(run.id, serial)}
+          title={samePhone
+            ? `Chạy lại ${p.selectedCount} case đã chọn trong lần test #${run.id}; kết quả các case khác giữ nguyên, kết quả cũ lưu vào lịch sử`
+            : `Lần test #${run.id} chạy trên máy ${run.device_model ?? run.serial}: chọn máy đó, hoặc tạo lần test mới`}>
+          <Icon name="refresh" />Chạy lại ({p.selectedCount}) vào #{run.id}
+        </button>
+      )}
+      <button className={`btn ${rerun ? "" : "primary"}`} disabled={!canStart} onClick={() => p.onStart(serial, profile)}
+        title={p.readyCount ? (rerun ? "Tạo lần test mới chỉ gồm các case đã chọn" : "") : "Sinh audio ở Khối 1 trước"}>
+        <Icon name="play" />{rerun ? `Lần test mới (${p.selectedCount})` : `Chạy trên app (${p.selectedCount || "tất cả"})`}
       </button>
       <Popover iconOnly buttonClassName="info-btn" panelLabel="Chuẩn bị trước khi chạy" label={<Icon name="info" />}>
         {() => (
@@ -97,9 +118,14 @@ export function AppRunPanel(p: Props) {
       </Popover>
       <span className="spacer" />
       <select className="compact-select" aria-label="Lần test" title="Lần test" value={p.runId ?? ""}
-        onChange={(e) => p.onSelectRun(e.target.value ? Number(e.target.value) : null)} disabled={!p.runs.length}>
+        onChange={(e) => {
+          if (e.target.value === MORE) return setShowAllRuns(true);
+          setShowAllRuns(false);
+          p.onSelectRun(e.target.value ? Number(e.target.value) : null);
+        }} disabled={!p.runs.length}>
         {!p.runs.length && <option value="">Chưa có lần test</option>}
-        {p.runs.map((r) => <option key={r.id} value={r.id}>{runLabel(r)}</option>)}
+        {shownRuns.map((r) => <option key={r.id} value={r.id}>{runLabel(r)}</option>)}
+        {hiddenRuns > 0 && <option value={MORE}>Xem thêm ({hiddenRuns} lần test cũ hơn)…</option>}
       </select>
       <button className="btn" disabled={!run || p.busy || pending === 0} onClick={() => run && p.onResume(run.id)}>
         <Icon name="refresh" />Chạy tiếp{pending ? ` (${pending})` : ""}

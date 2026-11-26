@@ -124,6 +124,17 @@ describe("app mode (block 2)", () => {
     expect(screen.getByText("50%")).toBeTruthy();
     expect(screen.getByText("Sai")).toBeTruthy();
   });
+  it("counts the attempts of a case run again and lists them in the tooltip", () => {
+    const item = makeItem(0, { status: "Đạt" });
+    const app = new Map([[1, {
+      id: 50, app_run_id: 7, item_id: 1, status: "Đúng" as const, app_text: "mua sữa", wer: 0, cer: 0,
+      ops: [], error: null, log: null,
+      history: [{ status: "Sai" as const, app_text: "mua sửa", wer: 0.5, cer: 0.1, error: null, updated_at: null }],
+    }]]);
+    render(<ItemTable items={[item]} onPatch={() => {}} app={app} />);
+    const badge = screen.getByText("Đúng ·2x");
+    expect(badge.getAttribute("title")).toBe('Lần 2 (hiện tại): Đúng\nLần 1: Sai — "mua sửa"');
+  });
 });
 
 describe("app mode layout", () => {

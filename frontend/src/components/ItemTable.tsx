@@ -50,6 +50,16 @@ function AppText({ r }: { r: AppResult | undefined }) {
   return <Ops ops={r.ops} />;
 }
 
+/** The badge tooltip: the error or status, then the earlier attempts of a case run again. */
+function appTitle(r: AppResult | undefined): string {
+  if (!r) return "";
+  const now = r.error ?? r.status;
+  if (!r.history?.length) return now;
+  const past = r.history.map((h, i) =>
+    `Lần ${r.history!.length - i}: ${h.status}${h.app_text ? ` — "${h.app_text}"` : h.error ? ` — ${h.error}` : ""}`);
+  return [`Lần ${r.history.length + 1} (hiện tại): ${now}`, ...past].join("\n");
+}
+
 function SttText({ item }: { item: Item }) {
   if (item.error && item.status === "Lỗi") return <span className="muted" title={item.error}>{item.error}</span>;
   if (!item.ref_text && !item.ops.length) return <span className="muted">—</span>;
@@ -193,8 +203,8 @@ export function ItemTable({
                 )}
                 <span>
                   {app ? (
-                    <span className={`badge ${STATUS_CLASS[ar?.status ?? ""] ?? ""}`} title={ar?.error ?? ar?.status ?? ""}>
-                      {ar?.status ?? "—"}
+                    <span className={`badge ${STATUS_CLASS[ar?.status ?? ""] ?? ""}`} title={appTitle(ar)}>
+                      {ar?.status ?? "—"}{ar?.history?.length ? ` ·${ar.history.length + 1}x` : ""}
                     </span>
                   ) : (
                     <span className={`badge ${STATUS_CLASS[it.status] ?? ""}`} title={it.skip_reason ?? it.error ?? it.status}>

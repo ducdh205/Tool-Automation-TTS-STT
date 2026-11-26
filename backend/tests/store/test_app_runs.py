@@ -102,3 +102,71 @@ def test_screenshot_path_and_source_row(env):
     row = store.get_app_result(rid)
     assert row["screenshot_path"] == "C:/shots/1.png"
     assert row["source_row"] == 5 and row["speaker"] == "👤 Người dùng" and row["region"] == "BAC-HN"
+
+
+def test_rerun_keeps_other_results_and_archives_the_old_one(env):
+    store, set_id = env
+    run_id = store.create_app_run(set_id, "SER1", "m", "p", None)
+    a, b, c = store.app_results(run_id)
+    store.record_app_result(a["id"], AppStatus.PASSED, "bật đèn", compare("bật đèn", "bật đèn"), None, "log a")
+    store.record_app_result(b["id"], AppStatus.FAILED, "tắt đen", compare("tắt đèn", "tắt đen"), None, "log b",
+                            screenshot_path="b.png")
+    store.record_app_result(c["id"], AppStatus.PASSED, "mở cốp", compare("mở cốp", "mở cốp"), None, "log c")
+
+    assert store.rerun_app_results(run_id, [b["item_id"]]) == 1
+
+    rows = {r["item_id"]: r for r in store.app_results(run_id)}
+    assert rows[a["item_id"]]["status"] == AppStatus.PASSED.value and rows[a["item_id"]]["history"] == []
+    again = rows[b["item_id"]]
+    assert again["id"] == b["id"]  # same row: the run stays complete
+    assert (again["status"], again["app_text"], again["wer"], again["log"], again["screenshot_path"]) == (
+        AppStatus.PENDING.value, None, None, None, None)
+    assert [(h["status"], h["app_text"], h["screenshot_path"]) for h in again["history"]] == [
+        (AppStatus.FAILED.value, "tắt đen", "b.png")]
+    assert [r["id"] for r in store.pending_for_block2(run_id)] == [b["id"]]
+    assert store.app_summary(run_id) == {AppStatus.PASSED.value: 2, AppStatus.PENDING.value: 1}
+
+
+def test_rerun_history_is_newest_first(env):
+    store, set_id = env
+    run_id = store.create_app_run(set_id, "SER1", "m", "p", None)
+    a = store.app_results(run_id)[0]
+    for heard in ("bật đen", "bậc đèn"):
+        store.record_app_result(a["id"], AppStatus.FAILED, heard, compare("bật đèn", heard), None, "")
+        store.rerun_app_results(run_id, [a["item_id"]])
+    assert [h["app_text"] for h in store.get_app_result(a["id"])["history"]] == ["bậc đèn", "bật đen"]
+
+
+def test_rerun_of_pending_row_archives_nothing(env):
+    store, set_id = env
+    run_id = store.create_app_run(set_id, "SER1", "m", "p", None)
+    a = store.app_results(run_id)[0]
+    assert store.rerun_app_results(run_id, [a["item_id"]]) == 1
+    assert store.get_app_result(a["id"])["history"] == []
+
+
+def test_rerun_adds_items_missing_from_the_run_and_takes_current_audio(env):
+    store, set_id = env
+    first = store.get_items(set_id)[0]
+    run_id = store.create_app_run(set_id, "SER1", "m", "p", None, item_ids=[first["id"]])
+    a = store.app_results(run_id)[0]
+    store.record_app_result(a["id"], AppStatus.FAILED, "x", compare("bật đèn", "x"), None, "")
+    store.record_generated(first["id"], "new.wav", 2)  # audio regenerated in step 1 since the run
+    other = store.get_items(set_id)[1]
+
+    assert store.rerun_app_results(run_id, [first["id"], other["id"]]) == 2
+
+    rows = {r["item_id"]: r for r in store.app_results(run_id)}
+    assert set(rows) == {first["id"], other["id"]}
+    assert rows[first["id"]]["audio_path"] == "new.wav"
+    assert rows[first["id"]]["history"][0]["audio_path"].endswith(f"{first['id']}.wav")
+    assert rows[other["id"]]["status"] == AppStatus.PENDING.value
+
+
+def test_rerun_ignores_items_without_audio_or_from_another_set(env):
+    store, set_id = env
+    other_set = store.create_audio_set("o", "o.xlsx", ["S"], "v", [_item("9", "xin chào")])
+    foreign = store.get_items(other_set)[0]["id"]
+    run_id = store.create_app_run(set_id, "SER1", "m", "p", None)
+    assert store.rerun_app_results(run_id, [foreign]) == 0
+    assert len(store.app_results(run_id)) == 3

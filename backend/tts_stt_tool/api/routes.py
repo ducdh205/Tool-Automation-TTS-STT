@@ -717,6 +717,35 @@ async def resume_app_run(request: Request, run_id: int) -> dict[str, str]:
     return {"job_id": _start_block2(ctx, run_id, run["serial"], _profile(ctx, run["profile_name"]))}
 
 
+class RerunIn(BaseModel):
+    serial: str = Field(min_length=1)
+    item_ids: list[int] = Field(min_length=1)
+
+
+@router.post("/app-runs/{run_id}/rerun")
+async def rerun_app_run(request: Request, run_id: int, body: RerunIn) -> dict[str, str]:
+    """Run some cases again inside this run: the other results stay, the old ones go to history."""
+    ctx = ctx_of(request)
+    run = _require_run(ctx, run_id)
+    profile = _profile(ctx, run["profile_name"])
+    if ctx.runner.current() is not None:
+        raise HTTPException(409, f"Đang chạy: {ctx.runner.current()['name']}")
+    if body.serial != run["serial"]:
+        raise HTTPException(409, f"Lần test #{run_id} chạy trên máy {run['device_model'] or run['serial']}"
+                                 " — chọn máy đó, hoặc tạo lần test mới")
+    if ctx.device_factory is None and ctx.adb.available and run["app_version"]:
+        try:
+            version = await ctx.adb.app_version(body.serial, profile.package)
+        except AdbError:
+            version = None
+        if version and version != run["app_version"]:
+            raise HTTPException(409, f"App đã đổi phiên bản ({run['app_version']} → {version})"
+                                     f" so với lần test #{run_id} — tạo lần test mới")
+    if not ctx.store.rerun_app_results(run_id, body.item_ids):
+        raise HTTPException(422, "Không có câu nào có audio trong các case đã chọn")
+    return {"job_id": _start_block2(ctx, run_id, run["serial"], profile)}
+
+
 def _run_file_base(ctx: AppContext, run: dict[str, Any]) -> str:
     s = ctx.store.get_audio_set(run["audio_set_id"]) or {}
     return f"{_safe_name(s.get('name') or 'bo-audio')}_Phien{run['id']}"

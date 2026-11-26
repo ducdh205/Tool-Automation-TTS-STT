@@ -317,7 +317,12 @@ async def run_block2(
             return None
         try:
             shots_dir.mkdir(parents=True, exist_ok=True)
+            # a re-run keeps the earlier attempt's photo (its history points at it)
             path = shots_dir / f"{result_id}.png"
+            n = 2
+            while path.exists():
+                path = shots_dir / f"{result_id}_{n}.png"
+                n += 1
             path.write_bytes(png)
         except OSError as e:  # disk full, antivirus lock: the result matters more than its photo
             log.append(f"Không lưu được ảnh: {e}")

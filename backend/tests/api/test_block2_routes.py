@@ -263,3 +263,36 @@ def test_profile_between_delay(ctx):
     assert c.put(f"/api/profiles/{p['name']}", json=p | {"between_delay_s": 61}).status_code == 422
     old = {k: v for k, v in p.items() if k != "between_delay_s"}  # older clients omit the field
     assert c.put(f"/api/profiles/{p['name']}", json=old).status_code == 200
+
+
+def test_rerun_keeps_the_rest_of_the_run_and_its_history(ctx):
+    c, app, fake, tmp_path = ctx
+    set_id, run_id = finished_run(c, tmp_path)
+    first, second = c.get(f"/api/app-runs/{run_id}/results").json()
+    old_shot = Path(first["screenshot_path"])
+
+    r = c.post(f"/api/app-runs/{run_id}/rerun", json={"serial": "SER", "item_ids": [first["item_id"]]})
+    assert r.status_code == 200, r.text
+    wait_job_end(c)
+
+    assert [x["id"] for x in c.get(f"/api/audio-sets/{set_id}/app-runs").json()].count(run_id) == 1
+    rows = {x["item_id"]: x for x in c.get(f"/api/app-runs/{run_id}/results").json()}
+    assert len(rows) == 2  # nothing lost
+    assert rows[second["item_id"]]["history"] == [] and rows[second["item_id"]]["status"] == "Sai"
+    again = rows[first["item_id"]]
+    assert again["status"] == "Sai" and [h["status"] for h in again["history"]] == ["Sai"]
+    assert again["history"][0]["screenshot_path"] == str(old_shot) and old_shot.is_file()
+    assert Path(again["screenshot_path"]) != old_shot and Path(again["screenshot_path"]).is_file()
+
+
+def test_rerun_refuses_another_phone_and_empty_picks(ctx):
+    c, _, _, tmp_path = ctx
+    set_id, run_id = finished_run(c, tmp_path)
+    first = c.get(f"/api/app-runs/{run_id}/results").json()[0]
+    r = c.post(f"/api/app-runs/{run_id}/rerun", json={"serial": "OTHER", "item_ids": [first["item_id"]]})
+    assert r.status_code == 409
+    assert c.get(f"/api/app-runs/{run_id}/results").json()[0]["history"] == []  # untouched
+    skipped = [i["id"] for i in c.get(f"/api/audio-sets/{set_id}/items").json() if not i["audio_path"]]
+    assert c.post(f"/api/app-runs/{run_id}/rerun", json={"serial": "SER", "item_ids": skipped}).status_code == 422
+    assert c.post(f"/api/app-runs/{run_id}/rerun", json={"serial": "SER", "item_ids": []}).status_code == 422
+    assert c.post("/api/app-runs/9999/rerun", json={"serial": "SER", "item_ids": [1]}).status_code == 404
