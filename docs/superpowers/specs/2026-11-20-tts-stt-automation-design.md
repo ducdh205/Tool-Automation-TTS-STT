@@ -43,7 +43,7 @@ Kết quả cuối cùng: báo cáo Excel với tỉ lệ đúng của app.
 - **VieNeu-TTS** (Apache-2.0): `pip install vieneu`, SDK Python `Vieneu(mode="v3turbo")`, ~25 giọng mẫu,
   48 kHz. GPU cần torch CUDA (cu128) cài trước.
 - **wyoming-vietnamese** (MIT, https://github.com/luuquangvu/wyoming-vietnamese): server giao thức
-  Wyoming TCP cổng 10300; STT sherpa-onnx Zipformer (CPU), 1–2 GB RAM; model tải lần đầu.
+  Wyoming TCP cổng 10300; STT sherpa-onnx Gipformer 1.5 68M (CPU, `STT_ENGINE=gipformer`), 3–4 GB RAM; model tải lần đầu.
   README chỉ hướng dẫn Docker; repo quản lý bằng uv.
 - App test là **app bên ngoài**, không có resource-id ổn định.
 - **Điện thoại test là máy công ty bị khóa: không được cài thêm app.** → Không dùng uiautomator2

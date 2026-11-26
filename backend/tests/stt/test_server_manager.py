@@ -25,6 +25,18 @@ def test_launch_model_dir_from_env(monkeypatch, tmp_path):
     assert env["DOWNLOAD_DIR"] == str((tmp_path / "bundled" / "models").resolve())
 
 
+def test_launch_uses_gipformer_by_default(monkeypatch, tmp_path):
+    monkeypatch.delenv("STT_ENGINE", raising=False)
+    _, _, env = default_wyoming_launch(tmp_path, 10300)
+    assert env["STT_ENGINE"] == "gipformer"
+
+
+def test_launch_stt_engine_from_env(monkeypatch, tmp_path):
+    monkeypatch.setenv("STT_ENGINE", "zipformer")
+    _, _, env = default_wyoming_launch(tmp_path, 10300)
+    assert env["STT_ENGINE"] == "zipformer"
+
+
 def test_bundled_runtime_preferred(monkeypatch, tmp_path):
     bundled = tmp_path / "runtime" / "py314" / "python.exe"
     bundled.parent.mkdir(parents=True)

@@ -13,6 +13,7 @@ from tts_stt_tool.stt.wyoming_client import SttError
 REPO_ROOT = Path(__file__).resolve().parents[3]
 VENDOR_DIR = REPO_ROOT / "vendor" / "wyoming-vietnamese"
 LAUNCHER = Path(__file__).with_name("wyoming_win_launcher.py")
+DEFAULT_STT_ENGINE = "gipformer"
 
 
 def wyoming_python() -> Path:
@@ -38,6 +39,8 @@ def default_wyoming_launch(data_dir: Path, port: int) -> tuple[list[str], Path, 
         "CACHE_DIR": str(wy / "cache"),
         "DOWNLOAD_DIR": str(wy / "models"),
         "WYOMING_PORT": str(port),
+        # Gipformer 1.5 68M: more accurate and noise-robust than the default Zipformer 30M.
+        "STT_ENGINE": os.environ.get("STT_ENGINE") or DEFAULT_STT_ENGINE,
         "PYTHONIOENCODING": "utf-8",
         "PYTHONPATH": "",  # don't leak the parent's site-packages (different Python/numpy)
         "HF_HUB_DISABLE_SYMLINKS_WARNING": "1",
