@@ -113,9 +113,9 @@ def test_manual_input_and_pin_blocked_while_job_uses_the_phone(ctx):
     time.sleep(0.3)
     assert c.post("/api/device/SER/input", json={"action": "tap", "x": 1, "y": 1}).status_code == 409
     assert c.get("/api/device/SER/node-at", params={"x": 1, "y": 1}).status_code == 409
-    assert c.get("/api/device").json()["busy"] == "SER"
+    assert c.get("/api/device").json()["busy"] == ["SER"]
     wait_job_end(c, timeout=30)
-    assert c.get("/api/device").json()["busy"] is None
+    assert c.get("/api/device").json()["busy"] == []
 
 
 def test_block1_runs_beside_block2(ctx):
@@ -364,3 +364,106 @@ def test_run_threshold_regrades_results_and_becomes_the_default(ctx):
     s.pop("app_wer_threshold")
     assert c.put("/api/settings", json=s).status_code == 200
     assert c.get("/api/settings").json()["app_wer_threshold"] == 0.3
+
+
+class PairSpeaker:
+    def __init__(self, fakes):
+        self.fakes, self.calls = fakes, 0
+
+    def play(self, path):
+        self.calls += 1
+        for f in self.fakes.values():
+            f.play(path)
+
+
+@pytest.fixture
+def pair_ctx(tmp_path, monkeypatch):
+    import tts_stt_tool.pipeline.block2 as b2
+
+    monkeypatch.setattr(b2, "POLL_S", 0.001)
+    fakes = {"SER": FakeApp(transcript="bật đèn"), "SER2": FakeApp(transcript="tắt đèn")}
+    spk = PairSpeaker(fakes)
+
+    async def factory(serial):
+        return fakes[serial]
+
+    tts = FakeTts()
+    app = create_app(Settings(data_dir=tmp_path), tts=tts, stt=EchoStt(tts), manage_wyoming=False,
+                     device_factory=factory, player=spk)
+    with TestClient(app) as c:
+        yield c, fakes, spk, tmp_path
+
+
+def test_pair_run_end_to_end(pair_ctx):
+    c, fakes, spk, tmp_path = pair_ctx
+    name = fast_profile(c)
+    set_id = verified_set(c, tmp_path)
+    r = c.post(f"/api/audio-sets/{set_id}/app-runs", json={"serial": "SER", "serial2": "SER2", "profile": name})
+    assert r.status_code == 200, r.text
+    a, b = r.json()["id"], r.json()["pair_id"]
+    wait_job_end(c)
+    assert [x["app_text"] for x in c.get(f"/api/app-runs/{a}/results").json()] == ["bật đèn"] * 2
+    assert [x["app_text"] for x in c.get(f"/api/app-runs/{b}/results").json()] == ["tắt đèn"] * 2
+    runs = {x["id"]: x for x in c.get(f"/api/audio-sets/{set_id}/app-runs").json()}
+    assert runs[a]["pair_run_id"] == b and runs[b]["pair_run_id"] == a
+    assert runs[b]["serial"] == "SER2"
+    assert spk.calls == 2  # one playback per sentence for both phones
+
+
+def test_pair_same_serial_rejected(pair_ctx):
+    c, fakes, spk, tmp_path = pair_ctx
+    name = fast_profile(c)
+    set_id = verified_set(c, tmp_path)
+    r = c.post(f"/api/audio-sets/{set_id}/app-runs", json={"serial": "SER", "serial2": "SER", "profile": name})
+    assert r.status_code == 422
+    assert c.get(f"/api/audio-sets/{set_id}/app-runs").json() == []
+
+
+def test_busy_lists_both_phones(pair_ctx):
+    import time
+
+    c, fakes, spk, tmp_path = pair_ctx
+    for f in fakes.values():
+        f.transcript = None
+    name = fast_profile(c)
+    p = next(x for x in c.get("/api/profiles").json() if x["name"] == name) | {"result_timeout_s": 3}
+    c.put(f"/api/profiles/{name}", json=p)
+    set_id = verified_set(c, tmp_path)
+    c.post(f"/api/audio-sets/{set_id}/app-runs", json={"serial": "SER", "serial2": "SER2", "profile": name})
+    time.sleep(0.3)
+    assert c.get("/api/device").json()["busy"] == ["SER", "SER2"]
+    assert c.post("/api/device/SER2/input", json={"action": "tap", "x": 1, "y": 1}).status_code == 409
+    c.post(f"/api/jobs/{c.get('/api/jobs/current').json()['id']}/cancel")
+    wait_job_end(c, timeout=30)
+    assert c.get("/api/device").json()["busy"] == []
+
+
+def test_resume_pair_runs_both(pair_ctx):
+    c, fakes, spk, tmp_path = pair_ctx
+    name = fast_profile(c)
+    set_id = verified_set(c, tmp_path)
+    r = c.post(f"/api/audio-sets/{set_id}/app-runs", json={"serial": "SER", "serial2": "SER2", "profile": name})
+    a, b = r.json()["id"], r.json()["pair_id"]
+    wait_job_end(c)
+    store = c.app.state.ctx.store
+    for run in (a, b):  # make the last sentence of both runs wait again
+        last = store.app_results(run)[-1]
+        store.rerun_app_results(run, [last["item_id"]])
+    calls = spk.calls
+    assert c.post(f"/api/app-runs/{a}/resume").status_code == 200
+    wait_job_end(c)
+    assert spk.calls == calls + 1
+    for run in (a, b):
+        assert "Chờ" not in {x["status"] for x in c.get(f"/api/app-runs/{run}/results").json()}
+
+
+def test_resume_pair_when_partner_deleted(pair_ctx):
+    c, fakes, spk, tmp_path = pair_ctx
+    name = fast_profile(c)
+    set_id = verified_set(c, tmp_path)
+    r = c.post(f"/api/audio-sets/{set_id}/app-runs", json={"serial": "SER", "serial2": "SER2", "profile": name})
+    a, b = r.json()["id"], r.json()["pair_id"]
+    wait_job_end(c)
+    c.app.state.ctx.store.delete_app_run(b)
+    assert c.post(f"/api/app-runs/{a}/resume").status_code == 200
+    wait_job_end(c)

@@ -49,7 +49,7 @@ class AppContext:
     wda_launcher: WdaLauncher | None = None  # "Kết nối iPhone": starts WDA + port forward
     device_factory: Callable[[str], Awaitable[Any]] | None = None  # serial -> DeviceDriver
     player: Any = None  # AudioPlayer
-    busy_serial: str | None = None  # phone driven by a running block 2 job
+    busy_serials: set[str] = field(default_factory=set)  # phones driven by a running block 2 job
     gpu: GpuSetup = field(default_factory=GpuSetup)  # NVIDIA / torch CUDA checks + installer
     exports: dict[str, tuple[Path, str]] = field(default_factory=dict)  # one-time token -> (zip, download name)
 

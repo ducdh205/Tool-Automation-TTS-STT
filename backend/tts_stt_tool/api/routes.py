@@ -28,7 +28,7 @@ from tts_stt_tool.input.generic import ColumnMapping, preview_sheet, read_items,
 from tts_stt_tool.input.testcase_form import InputError
 from tts_stt_tool.jobs.runner import JobBusyError, Lane
 from tts_stt_tool.pipeline.block1 import run_generate, run_verify
-from tts_stt_tool.pipeline.block2 import run_block2
+from tts_stt_tool.pipeline.block2 import Lane, run_block2_multi
 from tts_stt_tool.report.audio_set_zip import PackError, build_audio_set_zip, import_audio_set_zip, pack_name
 from tts_stt_tool.report.excel import build_block1_report, export_block1_csv
 from tts_stt_tool.report.result_export import build_result_report, result_suffix
@@ -50,7 +50,7 @@ def ctx_of(request: Request) -> AppContext:
 
 def _require_free(ctx: AppContext, serial: str) -> None:
     """Manual taps / pin dumps would break the sentence a block 2 job is running on this phone."""
-    if ctx.busy_serial == serial:
+    if serial in ctx.busy_serials:
         raise HTTPException(409, "Điện thoại đang chạy test app — tạm khóa thao tác tay")
 
 
@@ -594,7 +594,7 @@ async def device_status(request: Request) -> dict[str, Any]:
     if not adb.available and not ctx.ios.available:
         errors.append("Không tìm thấy adb")
     return {"adb": adb.available, "ios": ctx.ios.available, "error": "; ".join(errors) or None,
-            "devices": devices, "busy": ctx.busy_serial}
+            "devices": devices, "busy": sorted(ctx.busy_serials)}
 
 
 def _launcher(ctx: AppContext):
@@ -618,7 +618,7 @@ async def ios_connect(request: Request) -> dict[str, Any]:
 @router.post("/ios/disconnect")
 async def ios_disconnect(request: Request) -> dict[str, Any]:
     ctx = ctx_of(request)
-    if ctx.busy_serial and await ctx.ios.is_ios(ctx.busy_serial):
+    if any([await ctx.ios.is_ios(s) for s in ctx.busy_serials]):
         raise HTTPException(409, "Đang chạy test app trên iPhone — dừng job trước")
     return _launcher(ctx).stop()
 
@@ -755,23 +755,46 @@ class AppRunIn(BaseModel):
     serial: str = Field(min_length=1)
     profile: str
     item_ids: list[int] | None = None  # None = every row that passed Block 1
+    serial2: str | None = None  # a second phone: both hear each sentence from one playback
 
 
-def _start_block2(ctx: AppContext, run_id: int, set_id: int, serial: str, profile: AppProfile) -> str:
-    """Start a Block 2 job beside a Block 1 job (not beside "Sinh lại" on this set)."""
+def _start_block2(ctx: AppContext, set_id: int, runs: list[tuple[int, str]], profile: AppProfile) -> str:
+    """Start a Block 2 job on one or two phones (``runs`` = [(run id, serial)]).
+
+    It runs beside a Block 1 job (not beside "Sinh lại" on this set).
+    """
+    serials = [s for _, s in runs]
+
     async def job(emit, cancel) -> None:
-        ctx.busy_serial = serial
+        ctx.busy_serials.update(serials)
         try:
-            dev = await ctx.device(serial)
-            await run_block2(ctx.store, run_id, dev, profile, ctx.player, ctx.settings, emit, cancel,
-                             shots_dir=ctx.run_dir(run_id))
+            lanes = []
+            for run_id, serial in runs:
+                run = ctx.store.get_app_run(run_id) or {}
+                lanes.append(Lane(run_id, await ctx.device(serial), ctx.run_dir(run_id),
+                                  name=run.get("device_model") or serial))
+            await run_block2_multi(ctx.store, lanes, profile, ctx.player, ctx.settings, emit, cancel)
         finally:
-            ctx.busy_serial = None
+            ctx.busy_serials.difference_update(serials)
 
+    name = "Khối 2 – lần test " + " + ".join(str(r) for r, _ in runs)
     try:
-        return ctx.runner.start(f"Khối 2 – lần test {run_id}", job, lane="block2", set_id=set_id)
+        return ctx.runner.start(name, job, lane="block2", set_id=set_id)
     except JobBusyError as e:
         raise HTTPException(409, str(e)) from e
+
+
+async def _connected(ctx: AppContext, serial: str) -> bool:
+    """Whether ``serial`` is plugged in and ready to drive (tests inject devices: always)."""
+    if ctx.device_factory is not None:
+        return True
+    try:
+        if ctx.adb.available and any(d.serial == serial and d.state == "device" for d in await ctx.adb.devices()):
+            return True
+        return ctx.ios.available and any(d["serial"] == serial and d["state"] == "device"
+                                         for d in await ctx.ios.devices())
+    except DEVICE_ERRORS:
+        return False
 
 
 def _profile(ctx: AppContext, name: str) -> AppProfile:
@@ -787,15 +810,24 @@ async def create_app_run(request: Request, set_id: int, body: AppRunIn) -> dict[
     _require_set(ctx, set_id)
     profile = _profile(ctx, body.profile)
     _require_lane_free(ctx, "block2", set_id)
+    if body.serial2 is not None and body.serial2 == body.serial:
+        raise HTTPException(422, "Hai máy phải khác nhau")
     if not ctx.store.count_with_audio(set_id):
         raise HTTPException(422, "Bộ audio chưa có câu nào có audio — sinh audio ở Khối 1 trước")
-    model, version = await _device_model_version(ctx, body.serial, profile.package)
-    run_id = ctx.store.create_app_run(set_id, body.serial, model, profile.name, version, item_ids=body.item_ids,
-                                      wer_threshold=ctx.settings.app_wer_threshold)
-    if not ctx.store.app_results(run_id):
-        ctx.store.delete_app_run(run_id)
+    serials = [body.serial] + ([body.serial2] if body.serial2 else [])
+    runs: list[tuple[int, str]] = []
+    for serial in serials:
+        model, version = await _device_model_version(ctx, serial, profile.package)
+        runs.append((ctx.store.create_app_run(set_id, serial, model, profile.name, version, item_ids=body.item_ids,
+                                              wer_threshold=ctx.settings.app_wer_threshold), serial))
+    if not ctx.store.app_results(runs[0][0]):
+        for run_id, _ in runs:
+            ctx.store.delete_app_run(run_id)
         raise HTTPException(422, "Không có câu nào có audio trong các case đã chọn")
-    return {"id": run_id, "job_id": _start_block2(ctx, run_id, set_id, body.serial, profile)}
+    if len(runs) == 2:
+        ctx.store.link_pair(runs[0][0], runs[1][0])
+    return {"id": runs[0][0], "pair_id": runs[1][0] if len(runs) == 2 else None,
+            "job_id": _start_block2(ctx, set_id, runs, profile)}
 
 
 def _require_run(ctx: AppContext, run_id: int) -> dict[str, Any]:
@@ -825,7 +857,11 @@ def set_run_threshold(request: Request, run_id: int, body: ThresholdIn) -> dict[
 async def resume_app_run(request: Request, run_id: int) -> dict[str, str]:
     ctx = ctx_of(request)
     run = _require_run(ctx, run_id)
-    return {"job_id": _start_block2(ctx, run_id, run["audio_set_id"], run["serial"], _profile(ctx, run["profile_name"]))}
+    runs = [(run_id, run["serial"])]
+    pair = ctx.store.get_app_run(run["pair_run_id"]) if run.get("pair_run_id") else None
+    if pair is not None and await _connected(ctx, pair["serial"]):
+        runs.append((pair["id"], pair["serial"]))  # the other phone of this job is here too: go on together
+    return {"job_id": _start_block2(ctx, run["audio_set_id"], runs, _profile(ctx, run["profile_name"]))}
 
 
 class RerunIn(BaseModel):
@@ -850,7 +886,7 @@ async def rerun_app_run(request: Request, run_id: int, body: RerunIn) -> dict[st
                                      f" so với lần test #{run_id} — tạo lần test mới")
     if not ctx.store.rerun_app_results(run_id, body.item_ids):
         raise HTTPException(422, "Không có câu nào có audio trong các case đã chọn")
-    return {"job_id": _start_block2(ctx, run_id, run["audio_set_id"], run["serial"], profile)}
+    return {"job_id": _start_block2(ctx, run["audio_set_id"], [(run_id, run["serial"])], profile)}
 
 
 def _run_file_base(ctx: AppContext, run: dict[str, Any]) -> str:
