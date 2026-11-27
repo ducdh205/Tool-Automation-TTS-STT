@@ -170,3 +170,37 @@ def test_rerun_ignores_items_without_audio_or_from_another_set(env):
     run_id = store.create_app_run(set_id, "SER1", "m", "p", None)
     assert store.rerun_app_results(run_id, [foreign]) == 0
     assert len(store.app_results(run_id)) == 3
+
+
+def test_link_pair_sets_both(env):
+    store, set_id = env
+    a = store.create_app_run(set_id, "A", "m", "p", None)
+    b = store.create_app_run(set_id, "B", "m", "p", None)
+    store.link_pair(a, b)
+    assert store.get_app_run(a)["pair_run_id"] == b
+    assert store.get_app_run(b)["pair_run_id"] == a
+    assert {r["id"]: r["pair_run_id"] for r in store.list_app_runs(set_id)} == {a: b, b: a}
+
+
+def test_delete_one_of_pair_unlinks_other(env):
+    store, set_id = env
+    a = store.create_app_run(set_id, "A", "m", "p", None)
+    b = store.create_app_run(set_id, "B", "m", "p", None)
+    store.link_pair(a, b)
+    store.delete_app_run(a)
+    assert store.get_app_run(b)["pair_run_id"] is None
+
+
+def test_old_db_gets_pair_column(tmp_path):
+    import sqlite3
+
+    path = tmp_path / "t.db"
+    Store(path)
+    conn = sqlite3.connect(path)
+    conn.execute("ALTER TABLE app_runs DROP COLUMN pair_run_id")
+    conn.commit()
+    conn.close()
+    store = Store(path)
+    set_id = store.create_audio_set("s", "f.xlsx", ["S"], "v", [_item("1", "bật đèn")])
+    a = store.create_app_run(set_id, "A", "m", "p", None)
+    assert store.get_app_run(a)["pair_run_id"] is None

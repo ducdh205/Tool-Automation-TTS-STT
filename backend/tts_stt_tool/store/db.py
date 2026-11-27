@@ -82,7 +82,8 @@ CREATE TABLE IF NOT EXISTS app_runs (
     audio_set_id INTEGER NOT NULL REFERENCES audio_sets(id) ON DELETE CASCADE,
     serial TEXT, device_model TEXT, profile_name TEXT, app_version TEXT,
     created_at TEXT NOT NULL,
-    wer_threshold REAL NOT NULL DEFAULT 0  -- a result is "Đúng" when its MER is at most this
+    wer_threshold REAL NOT NULL DEFAULT 0,  -- a result is "Đúng" when its MER is at most this
+    pair_run_id INTEGER  -- the other phone's run when both ran in one job (one playback per sentence)
 );
 CREATE TABLE IF NOT EXISTS app_results (
     id INTEGER PRIMARY KEY,
@@ -163,8 +164,11 @@ class Store:
             for col, kind in (("source_path", "TEXT"), ("header_row", "INTEGER")):
                 if col not in cols:
                     c.execute(f"ALTER TABLE audio_sets ADD COLUMN {col} {kind}")
-            if "wer_threshold" not in {r["name"] for r in c.execute("PRAGMA table_info(app_runs)")}:
+            run_cols = {r["name"] for r in c.execute("PRAGMA table_info(app_runs)")}
+            if "wer_threshold" not in run_cols:
                 c.execute("ALTER TABLE app_runs ADD COLUMN wer_threshold REAL NOT NULL DEFAULT 0")
+            if "pair_run_id" not in run_cols:
+                c.execute("ALTER TABLE app_runs ADD COLUMN pair_run_id INTEGER")
 
     @contextmanager
     def _conn(self) -> Iterator[sqlite3.Connection]:
@@ -448,8 +452,15 @@ class Store:
             c.execute(sql + " ORDER BY id", params)
             return run_id
 
+    def link_pair(self, a: int, b: int) -> None:
+        """Mark two runs as the two phones of one job."""
+        with self._conn() as c:
+            c.execute("UPDATE app_runs SET pair_run_id=? WHERE id=?", (b, a))
+            c.execute("UPDATE app_runs SET pair_run_id=? WHERE id=?", (a, b))
+
     def delete_app_run(self, run_id: int) -> None:
         with self._conn() as c:
+            c.execute("UPDATE app_runs SET pair_run_id=NULL WHERE pair_run_id=?", (run_id,))
             c.execute("DELETE FROM app_runs WHERE id=?", (run_id,))  # results cascade
 
     def get_app_run(self, run_id: int) -> dict[str, Any] | None:
