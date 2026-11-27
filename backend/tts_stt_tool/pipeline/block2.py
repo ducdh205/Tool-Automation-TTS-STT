@@ -228,8 +228,8 @@ async def run_one(
         raise
 
 
-async def _run_one(dev: DeviceDriver, p: AppProfile, wav: Path, player: AudioPlayer, sleep: Sleep,
-                   log: list[str], is_correct: Callable[[str], bool] | None = None) -> AppCapture:
+async def prepare(dev: DeviceDriver, p: AppProfile, log: list[str], sleep: Sleep) -> None:
+    """Phase 1: from wherever the app is to a live mic, ready for the audio."""
     home = await ensure_home(dev, p, log, sleep)
     await _tap(dev, find(home, p.open_label), log)  # type: ignore[arg-type]
 
@@ -238,13 +238,37 @@ async def _run_one(dev: DeviceDriver, p: AppProfile, wav: Path, player: AudioPla
     await _wait_mic(dev, p, log, sleep)
     await sleep(p.pre_delay_s)
 
-    # Baseline dump while our audio plays: the app is listening, so no new bubble exists yet.
-    # (The chat may still hold earlier bubbles: the sheet does not always clear on reopen.)
-    base_task = asyncio.create_task(dev.nodes())
+
+async def speak(devs: list[DeviceDriver], wav: Path, player: AudioPlayer,
+                logs: list[list[str]]) -> list[list[UiNode] | BaseException]:
+    """Phase 2: play ``wav`` once for every listening phone; returns each phone's baseline dump.
+
+    Baseline dumps run while the audio plays: the app is listening, so no new bubble exists yet.
+    (The chat may still hold earlier bubbles: the sheet does not always clear on reopen.)
+    """
+    tasks = [asyncio.create_task(dev.nodes()) for dev in devs]
     await asyncio.sleep(0)
-    log.append(f"Phát {Path(wav).name}")
-    await asyncio.to_thread(player.play, wav)
-    base = await base_task
+    for log in logs:
+        log.append(f"Phát {Path(wav).name}")
+    try:
+        await asyncio.to_thread(player.play, wav)
+    finally:
+        bases = await asyncio.gather(*tasks, return_exceptions=True)
+    return list(bases)
+
+
+async def _run_one(dev: DeviceDriver, p: AppProfile, wav: Path, player: AudioPlayer, sleep: Sleep,
+                   log: list[str], is_correct: Callable[[str], bool] | None = None) -> AppCapture:
+    await prepare(dev, p, log, sleep)
+    [base] = await speak([dev], wav, player, [log])
+    if isinstance(base, BaseException):
+        raise base
+    return await read_result(dev, p, base, log, sleep, is_correct)
+
+
+async def read_result(dev: DeviceDriver, p: AppProfile, base: list[UiNode], log: list[str], sleep: Sleep,
+                      is_correct: Callable[[str], bool] | None = None) -> AppCapture:
+    """Phase 3: stop listening, read what the app heard, photograph a wrong answer, close the sheet."""
     if not _sheet_open(base, p):
         raise OperationError(f"Bảng '{p.sheet_label or p.close_label}' không mở")
     before = bubble_labels(base, dev.screen_w)

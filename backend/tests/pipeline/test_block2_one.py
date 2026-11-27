@@ -4,7 +4,7 @@ import pytest
 
 from backend.tests.pipeline.fake_app import FakeApp, no_sleep
 from tts_stt_tool.device.profile import AppProfile
-from tts_stt_tool.pipeline.block2 import OperationError, run_one
+from tts_stt_tool.pipeline.block2 import OperationError, prepare, read_result, run_one, speak
 
 WAV = Path("x.wav")
 
@@ -351,3 +351,37 @@ async def test_ios_bubble_without_form_waits_briefly_only():
     cap = await one(app)
     assert cap.text == "chỉnh nhiệt độ ghế lái lên 24 độ"
     assert app.taps[-1] == "BACK" and app.state == "home"
+
+
+class TwoSpeaker:
+    """One PC speaker heard by two phones."""
+
+    def __init__(self, *apps):
+        self.apps, self.calls = apps, 0
+
+    def play(self, path):
+        self.calls += 1
+        for a in self.apps:
+            a.play(path)
+
+
+async def test_speak_plays_once_for_two_devices():
+    a, b = FakeApp(), FakeApp()
+    for app in (a, b):
+        await prepare(app, AppProfile(), [], no_sleep)
+    spk = TwoSpeaker(a, b)
+    bases = await speak([a, b], WAV, spk, [[], []])
+    assert spk.calls == 1
+    assert a.played == [WAV] and b.played == [WAV]
+    assert all(isinstance(x, list) for x in bases)
+
+
+async def test_phases_compose_like_run_one():
+    ref = FakeApp()
+    await one(ref)
+    app, prof, log = FakeApp(), AppProfile(), []
+    await prepare(app, prof, log, no_sleep)
+    [base] = await speak([app], WAV, app, [log])
+    cap = await read_result(app, prof, base, log, no_sleep, None)
+    assert cap.text == app.transcript
+    assert app.taps == ref.taps
