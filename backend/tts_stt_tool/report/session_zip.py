@@ -13,6 +13,7 @@ from tts_stt_tool.tts.regions import voices_label
 from tts_stt_tool.config import Settings
 from tts_stt_tool.report.excel import build_block1_report, format_ops
 from tts_stt_tool.report.result_export import build_result_report, result_suffix
+from tts_stt_tool.report.device_label import device_name, device_tag, platform_label
 from tts_stt_tool.report.layout import case_folders, safe_component, turn_prefix
 from tts_stt_tool.store.db import AppStatus, Store
 
@@ -24,7 +25,7 @@ _STORED = (".wav", ".png")  # already compressed / not worth deflating
 def session_root_name(run: dict[str, Any]) -> str:
     stamp = (run.get("created_at") or "")[:16]  # 2026-11-20T15:30
     day, _, clock = stamp.partition("T")
-    return f"Phien{run['id']}_{day}_{clock.replace(':', '')}_{safe_component(run.get('device_model') or run.get('serial') or '')}"
+    return f"Phien{run['id']}_{day}_{clock.replace(':', '')}_{safe_component(device_tag(run))}"
 
 
 def _pct(x: float | None) -> str:
@@ -60,7 +61,7 @@ def _session_info(store: Store, run: dict[str, Any], settings: Settings, results
         f"Bộ audio: {s.get('name', '')}",
         f"File nguồn: {s.get('source_file', '')}",
         f"Giọng: {voices_label(s if s.get('voice') else settings)}",
-        f"Thiết bị: {run.get('device_model') or 'Android'} ({run.get('serial')})",
+        f"Thiết bị: {platform_label(run)} · {device_name(run)} ({run.get('serial')})",
         f"Hồ sơ app: {run.get('profile_name')}",
         f"Phiên bản app: {run.get('app_version') or '—'}",
         f"Bắt đầu: {run.get('created_at')}",
@@ -113,7 +114,7 @@ def build_session_zip(
     with tempfile.TemporaryDirectory() as tmp, zipfile.ZipFile(out_path, "w") as z:
         suffix = result_suffix(s)
         form = build_result_report(store, run_id, Path(tmp) / f"form{suffix}")
-        file(z, f"{root}/KetQua_{safe_component(s.get('name') or 'bo-audio')}_Phien{run_id}{suffix}", form)
+        file(z, f"{root}/KetQua_{safe_component(s.get('name') or 'bo-audio')}_Phien{run_id}_{safe_component(device_tag(run))}{suffix}", form)
         overview = build_block1_report(store, run["audio_set_id"], settings, Path(tmp) / "overview.xlsx", run_id)
         file(z, f"{root}/TongQuan.xlsx", overview)
         text(z, f"{root}/thong_tin_phien.txt", _session_info(store, run, settings, results, audio, selected, profile))

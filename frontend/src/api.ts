@@ -92,6 +92,8 @@ export interface AppRun {
   wer_threshold: number;
   /** The other phone's run when both ran in one job. */
   pair_run_id?: number | null;
+  /** Saved when the run was made (older runs: null). */
+  platform?: "android" | "ios" | null;
 }
 export interface AppResult {
   id: number; app_run_id: number; item_id: number; status: AppStatus; app_text: string | null;

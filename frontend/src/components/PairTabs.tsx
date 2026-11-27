@@ -13,7 +13,7 @@ const PLATFORM = { android: "Android", ios: "iPhone" } as const;
 
 function tabLabel(run: AppRun, devices: DeviceInfo[]): string {
   const name = run.device_model ?? run.serial;
-  const platform = devices.find((d) => d.serial === run.serial)?.platform;
+  const platform = run.platform ?? devices.find((d) => d.serial === run.serial)?.platform;
   return platform ? `${PLATFORM[platform]} · ${name}` : name;
 }
 

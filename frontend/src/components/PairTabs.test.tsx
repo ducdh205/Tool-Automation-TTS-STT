@@ -19,6 +19,11 @@ describe("PairTabs", () => {
     fireEvent.click(iphone);
     expect(onSelect).toHaveBeenCalledWith(4);
   });
+  it("uses the platform saved with the run when the phone is unplugged", () => {
+    render(<PairTabs runs={[{ ...runs[0], platform: "android" }, { ...runs[1], platform: "ios" }]} devices={[]}
+      current={3} onSelect={() => {}} />);
+    expect(screen.getByRole("button", { name: "iPhone · iPhone 15" })).toBeTruthy();
+  });
   it("names the phone only when its platform is unknown", () => {
     render(<PairTabs runs={[runs[0], runs[1]]} devices={[]} current={4} onSelect={() => {}} />);
     expect(screen.getByRole("button", { name: "22120RN86G" })).toBeTruthy();

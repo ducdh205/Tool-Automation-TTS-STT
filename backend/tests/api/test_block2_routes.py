@@ -191,7 +191,7 @@ def test_form_report_endpoint(ctx):
     assert r.status_code == 200, r.text
     assert "spreadsheetml" in r.headers["content-type"]
     assert "KetQua_" in r.headers["content-disposition"]
-    assert f"Phien{run_id}.xlsx" in r.headers["content-disposition"]
+    assert f"Phien{run_id}_Android_SER.xlsx" in r.headers["content-disposition"]
     assert openpyxl.load_workbook(io.BytesIO(r.content)).sheetnames[0] == "Tổng hợp phiên"
     assert c.post("/api/app-runs/999/form-report").status_code == 404
 
@@ -210,7 +210,7 @@ def test_export_zip_endpoint(ctx):
     assert url.startswith("/api/exports/")
     got = c.get(url)  # a plain GET: the browser streams it to disk instead of holding a blob
     assert got.status_code == 200 and got.headers["content-type"] == "application/zip"
-    assert f"Phien{run_id}_" in got.headers["content-disposition"]
+    assert f"Phien{run_id}_" in got.headers["content-disposition"] and "_Android_SER" in got.headers["content-disposition"]
     names = zipfile.ZipFile(io.BytesIO(got.content)).namelist()
     assert any(n.endswith("manhinh.png") for n in names)  # the fake app's answers are wrong -> screenshots
     assert any(n.endswith("thong_tin_phien.txt") for n in names)
@@ -467,3 +467,12 @@ def test_resume_pair_when_partner_deleted(pair_ctx):
     c.app.state.ctx.store.delete_app_run(b)
     assert c.post(f"/api/app-runs/{a}/resume").status_code == 200
     wait_job_end(c)
+
+
+def test_app_report_name_says_which_phone(ctx):
+    c, _, _, tmp_path = ctx
+    set_id, run_id = finished_run(c, tmp_path)
+    r = c.post(f"/api/audio-sets/{set_id}/report", params={"app_run_id": run_id})
+    assert r.status_code == 200, r.text
+    assert f"_Phien{run_id}_Android_SER.xlsx" in r.headers["content-disposition"]
+    assert c.get(f"/api/audio-sets/{set_id}/app-runs").json()[0]["platform"] == "android"

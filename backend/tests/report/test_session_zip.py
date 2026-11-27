@@ -15,15 +15,15 @@ def open_zip(session, tmp_path, **kw):
 
 def test_root_name():
     run = {"id": 12, "serial": "SER", "device_model": "Pixel 7/Pro", "created_at": "2026-11-20T15:30:12"}
-    assert session_root_name(run) == "Phien12_2026-11-20_1530_Pixel 7_Pro"
-    assert session_root_name(run | {"device_model": None}) == "Phien12_2026-11-20_1530_SER"
+    assert session_root_name(run) == "Phien12_2026-11-20_1530_Android_Pixel 7_Pro"
+    assert session_root_name(run | {"device_model": None}) == "Phien12_2026-11-20_1530_Android_SER"
 
 
 def test_zip_layout_default_audio_failed(tmp_path, session):
     z, names, root = open_zip(session, tmp_path)
     case = f"{root}/{SHEET}"
     assert {f"{root}/thong_tin_phien.txt", f"{root}/TongQuan.xlsx",
-            f"{root}/KetQua_Bộ điều khiển_Phien{session.run_id}.xlsx"} <= names
+            f"{root}/KetQua_Bộ điều khiển_Phien{session.run_id}_Android_Pixel 7.xlsx"} <= names
     assert {f"{case}/PASS_TC1/luot1_ketqua.txt", f"{case}/PASS_TC1/luot1_log.txt"} <= names
     assert f"{case}/PASS_TC1/luot1_audio.wav" not in names and f"{case}/PASS_TC1/luot1_manhinh.png" not in names
     assert z.read(f"{case}/FAIL_TC2/luot1_manhinh.png") == b"\x89PNG-wrong"
@@ -63,7 +63,7 @@ def test_missing_audio_is_noted_not_fatal(tmp_path, session):
 
 def test_zip_result_workbook(tmp_path, session):
     z, names, root = open_zip(session, tmp_path)
-    wb = openpyxl.load_workbook(io.BytesIO(z.read(f"{root}/KetQua_Bộ điều khiển_Phien{session.run_id}.xlsx")))
+    wb = openpyxl.load_workbook(io.BytesIO(z.read(f"{root}/KetQua_Bộ điều khiển_Phien{session.run_id}_Android_Pixel 7.xlsx")))
     assert wb.sheetnames == ["Tổng hợp phiên", SHEET]
     assert wb[SHEET]["E6"].value == "Fail"
 

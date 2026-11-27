@@ -41,6 +41,7 @@ def test_block2_sheets_and_rate(run, tmp_path):
     ov = wb[SHEET_OVERVIEW]
     assert find_value(ov, "Tỉ lệ đúng của app").value == pytest.approx(2 / 3)
     assert find_value(ov, "Thiết bị").value == "22120RN86G (SER1)"
+    assert find_value(ov, "Nền tảng").value == "Android"
     assert find_value(ov, "Phiên bản app").value == "1.0.7"
     app = wb[SHEET_APP]
     assert [c.value for c in app[1]] == APP_HEADERS
@@ -54,3 +55,21 @@ def test_no_block2_without_run(run, tmp_path):
     store, set_id, _, settings = run
     wb = openpyxl.load_workbook(build_block1_report(store, set_id, settings, tmp_path / "r.xlsx"))
     assert SHEET_APP not in wb.sheetnames
+
+
+def test_overview_names_the_other_phone_of_a_pair(run, tmp_path):
+    store, set_id, run_id, settings = run
+    other = store.create_app_run(set_id, "00008120-000C09D8266B601E", "iPhone 15", "Vita Work (dev)", "1.0.7",
+                                 platform="ios")
+    store.link_pair(run_id, other)
+    wb = openpyxl.load_workbook(build_block1_report(store, set_id, settings, tmp_path / "r.xlsx", app_run_id=other))
+    ov = wb[SHEET_OVERVIEW]
+    assert find_value(ov, "Nền tảng").value == "iPhone"
+    assert find_value(ov, "Chạy cùng").value == f"lần test #{run_id} (Android · 22120RN86G)"
+
+
+def test_iphone_without_model_is_not_called_android(run, tmp_path):
+    store, set_id, _, settings = run
+    rid = store.create_app_run(set_id, "U1", None, "Vita Work (dev)", None, platform="ios")
+    wb = openpyxl.load_workbook(build_block1_report(store, set_id, settings, tmp_path / "r.xlsx", app_run_id=rid))
+    assert wb[SHEET_OVERVIEW] and find_value(wb[SHEET_OVERVIEW], "Thiết bị").value == "U1"

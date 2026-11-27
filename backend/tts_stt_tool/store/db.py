@@ -83,7 +83,8 @@ CREATE TABLE IF NOT EXISTS app_runs (
     serial TEXT, device_model TEXT, profile_name TEXT, app_version TEXT,
     created_at TEXT NOT NULL,
     wer_threshold REAL NOT NULL DEFAULT 0,  -- a result is "Đúng" when its MER is at most this
-    pair_run_id INTEGER  -- the other phone's run when both ran in one job (one playback per sentence)
+    pair_run_id INTEGER,  -- the other phone's run when both ran in one job (one playback per sentence)
+    platform TEXT  -- "android" / "ios"; NULL on runs made before it was stored
 );
 CREATE TABLE IF NOT EXISTS app_results (
     id INTEGER PRIMARY KEY,
@@ -169,6 +170,8 @@ class Store:
                 c.execute("ALTER TABLE app_runs ADD COLUMN wer_threshold REAL NOT NULL DEFAULT 0")
             if "pair_run_id" not in run_cols:
                 c.execute("ALTER TABLE app_runs ADD COLUMN pair_run_id INTEGER")
+            if "platform" not in run_cols:
+                c.execute("ALTER TABLE app_runs ADD COLUMN platform TEXT")
 
     @contextmanager
     def _conn(self) -> Iterator[sqlite3.Connection]:
@@ -432,13 +435,13 @@ class Store:
     # -- block 2 (app runs) ------------------------------------------------
     def create_app_run(
         self, audio_set_id: int, serial: str, device_model: str | None, profile_name: str, app_version: str | None,
-        item_ids: list[int] | None = None, wer_threshold: float = 0.0,
+        item_ids: list[int] | None = None, wer_threshold: float = 0.0, platform: str | None = None,
     ) -> int:
         with self._conn() as c:
             cur = c.execute(
-                "INSERT INTO app_runs(audio_set_id, serial, device_model, profile_name, app_version, created_at,"
-                " wer_threshold) VALUES (?,?,?,?,?,?,?)",
-                (audio_set_id, serial, device_model, profile_name, app_version, _now(), wer_threshold),
+                "INSERT INTO app_runs(audio_set_id, serial, device_model, profile_name, app_version, platform, created_at,"
+                " wer_threshold) VALUES (?,?,?,?,?,?,?,?)",
+                (audio_set_id, serial, device_model, profile_name, app_version, platform, _now(), wer_threshold),
             )
             run_id = int(cur.lastrowid)
             # every row with audio goes to the app, whatever its verify result (shown beside it)

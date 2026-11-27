@@ -14,6 +14,7 @@ from openpyxl.utils import get_column_letter
 
 from tts_stt_tool.tts.regions import voices_label
 from tts_stt_tool.config import Settings
+from tts_stt_tool.report.device_label import device_name, platform_label
 from tts_stt_tool.store.db import AppStatus, ItemStatus, Store
 
 SHEET_OVERVIEW = "Tổng quan"
@@ -167,9 +168,15 @@ def _app_overview(ws: Any, store: Store, run_id: int, results: list[dict]) -> No
     avg = lambda key: sum(r[key] or 0 for r in tested) / len(tested) if tested else 0  # noqa: E731
     row = ws.max_row + 2
     ws.cell(row=row, column=1, value="KHỐI 2 – APP").font = Font(bold=True, size=13)
-    device = f"{run.get('device_model') or 'Android'} ({run.get('serial')})"
+    device = f"{run['device_model']} ({run.get('serial')})" if run.get("device_model") else run.get("serial")
     pairs: list[tuple[str, Any, str | None]] = [
-        ("Lần test", run_id, None), ("Thiết bị", device, None), ("Hồ sơ app", run.get("profile_name"), None),
+        ("Lần test", run_id, None), ("Thiết bị", device, None), ("Nền tảng", platform_label(run), None)]
+    partner = store.get_app_run(run["pair_run_id"]) if run.get("pair_run_id") else None
+    if partner is not None:
+        pairs.append(("Chạy cùng", f"lần test #{partner['id']} ({platform_label(partner)} · {device_name(partner)})",
+                      None))
+    pairs += [
+        ("Hồ sơ app", run.get("profile_name"), None),
         ("Phiên bản app", run.get("app_version") or "—", None), ("Thời gian", run.get("created_at"), None),
         ("Số câu test", len(results), None),
     ]

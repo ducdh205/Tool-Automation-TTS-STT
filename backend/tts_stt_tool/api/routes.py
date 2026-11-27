@@ -30,6 +30,7 @@ from tts_stt_tool.jobs.runner import JobBusyError, Lane
 from tts_stt_tool.pipeline.block1 import run_generate, run_verify
 from tts_stt_tool.pipeline.block2 import Lane, run_block2_multi
 from tts_stt_tool.report.audio_set_zip import PackError, build_audio_set_zip, import_audio_set_zip, pack_name
+from tts_stt_tool.report.device_label import device_tag
 from tts_stt_tool.report.excel import build_block1_report, export_block1_csv
 from tts_stt_tool.report.result_export import build_result_report, result_suffix
 from tts_stt_tool.report.session_zip import build_session_zip, session_root_name
@@ -433,6 +434,7 @@ async def report(
         run = ctx.store.get_app_run(app_run_id)
         if run is None or run["audio_set_id"] != set_id:
             raise HTTPException(404, "Lần test app không thuộc bộ audio này")
+        base += f"_Phien{app_run_id}_{_safe_name(device_tag(run))}"  # two phones of one job: tell them apart
     out = await asyncio.to_thread(build_block1_report, ctx.store, set_id, ctx.settings, ctx.reports / f"{base}.xlsx",
                                   app_run_id)
     return FileResponse(out, media_type=XLSX_TYPE, filename=out.name)
@@ -818,8 +820,10 @@ async def create_app_run(request: Request, set_id: int, body: AppRunIn) -> dict[
     runs: list[tuple[int, str]] = []
     for serial in serials:
         model, version = await _device_model_version(ctx, serial, profile.package)
+        platform = "ios" if await _is_ios(ctx, serial) else "android"
         runs.append((ctx.store.create_app_run(set_id, serial, model, profile.name, version, item_ids=body.item_ids,
-                                              wer_threshold=ctx.settings.app_wer_threshold), serial))
+                                              wer_threshold=ctx.settings.app_wer_threshold, platform=platform),
+                     serial))
     if not ctx.store.app_results(runs[0][0]):
         for run_id, _ in runs:
             ctx.store.delete_app_run(run_id)
@@ -891,7 +895,7 @@ async def rerun_app_run(request: Request, run_id: int, body: RerunIn) -> dict[st
 
 def _run_file_base(ctx: AppContext, run: dict[str, Any]) -> str:
     s = ctx.store.get_audio_set(run["audio_set_id"]) or {}
-    return f"{_safe_name(s.get('name') or 'bo-audio')}_Phien{run['id']}"
+    return f"{_safe_name(s.get('name') or 'bo-audio')}_Phien{run['id']}_{_safe_name(device_tag(run))}"
 
 
 @router.post("/app-runs/{run_id}/form-report")

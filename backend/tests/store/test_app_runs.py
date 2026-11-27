@@ -204,3 +204,10 @@ def test_old_db_gets_pair_column(tmp_path):
     set_id = store.create_audio_set("s", "f.xlsx", ["S"], "v", [_item("1", "bật đèn")])
     a = store.create_app_run(set_id, "A", "m", "p", None)
     assert store.get_app_run(a)["pair_run_id"] is None
+
+
+def test_run_keeps_its_platform(env):
+    store, set_id = env
+    a = store.create_app_run(set_id, "U", "iPhone 15", "p", None, platform="ios")
+    assert store.get_app_run(a)["platform"] == "ios"
+    assert store.get_app_run(store.create_app_run(set_id, "A", "m", "p", None))["platform"] is None
