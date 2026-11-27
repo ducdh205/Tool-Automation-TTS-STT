@@ -1,5 +1,5 @@
 import type { Job } from "./api";
-import { blockReason, jobAfterStart, jobsFromServer, laneBlocker, progressJob, removeJob, upsertJob } from "./jobState";
+import { addJobLog, blockReason, jobAfterStart, jobsFromServer, laneBlocker, logsFor, progressJob, removeJob, upsertJob } from "./jobState";
 
 const j = (over: Partial<Job>): Job => ({ id: "j", name: "x", done: 0, total: 0, lane: "block1", set_id: 1, ...over });
 
@@ -50,5 +50,24 @@ describe("lane locks", () => {
     expect(laneBlocker([app], "block2", 9)).toBe(app);
     expect(blockReason(app, "block2")).toBe("Đang chạy: Khối 2 – lần test 3");
     expect(blockReason(null, "block2")).toBeNull();
+  });
+});
+
+describe("job logs per phone", () => {
+  const ev = (message: string, run_id?: number | null) =>
+    ({ job_id: "j", kind: "log", done: 0, total: 1, item: null, message, run_id }) as const;
+  it("logs are kept per run", () => {
+    let logs = addJobLog([], ev("chung"), "10:00");
+    logs = addJobLog(logs, ev("máy A", 1), "10:01");
+    logs = addJobLog(logs, ev("máy B", 2), "10:02");
+    expect(logsFor(logs, 1)).toEqual(["10:00 chung", "10:01 máy A"]);
+    expect(logsFor(logs, 2)).toEqual(["10:00 chung", "10:02 máy B"]);
+    expect(logsFor(logs, null)).toEqual(["10:00 chung", "10:01 máy A", "10:02 máy B"]);
+  });
+  it("keeps the newest lines only", () => {
+    let logs: ReturnType<typeof addJobLog> = [];
+    for (let i = 0; i < 700; i++) logs = addJobLog(logs, ev(`l${i}`, 1), "t");
+    expect(logs.length).toBe(600);
+    expect(logsFor(logs, 1).at(-1)).toBe("t l699");
   });
 });

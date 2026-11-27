@@ -37,3 +37,20 @@ describe("DevicePanel iPhone connect button", () => {
     expect(screen.getByRole("button", { name: "Kết nối lại" })).toBeTruthy();
   });
 });
+
+describe("DevicePanel follows the shown run", () => {
+  it("follows the serial prop", async () => {
+    vi.spyOn(api, "device").mockResolvedValue({
+      adb: true, error: null, busy: [],
+      devices: [{ serial: "S1", state: "device", model: "M1" }, { serial: "S2", state: "device", model: "M2" }],
+    } as never);
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response(new Blob(["x"]), { status: 200 })) as never;
+    globalThis.URL.createObjectURL = () => "blob:x";
+    globalThis.URL.revokeObjectURL = () => {};
+    const { rerender } = render(<DevicePanel serial="S2" />);
+    const pick = await screen.findByDisplayValue("M2");
+    expect((pick as HTMLSelectElement).value).toBe("S2");
+    rerender(<DevicePanel serial="S1" />);
+    await waitFor(() => expect((screen.getByDisplayValue("M1") as HTMLSelectElement).value).toBe("S1"));
+  });
+});

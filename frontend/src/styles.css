@@ -366,3 +366,7 @@ nav { display: flex; flex-direction: column; gap: 2px; }
 .import-table .mapped { background: var(--accent-soft); }
 .import-table .tag { display: block; color: var(--accent); font-weight: 600; }
 @media (max-width: 720px) { .import-grid, .import-top { grid-template-columns: 1fr; } }
+
+/* Two phones in one Block 2 job: switch the view between them. */
+.pair-tabs { display: inline-flex; gap: 4px; margin-left: 8px; }
+.pair-tabs .btn { padding: 2px 10px; }

@@ -143,14 +143,17 @@ interface Props {
   /** Profile that pin mode assigns labels to. */
   profile?: AppProfile | null;
   onProfileSaved?: (p: AppProfile) => void;
+  /** Phone of the run on screen: the panel switches to it (two phones in one job). */
+  serial?: string | null;
 }
 
-export function DevicePanel({ jobLogs = [], profile = null, onProfileSaved }: Props) {
+export function DevicePanel({ jobLogs = [], profile = null, onProfileSaved, serial = null }: Props) {
   const status = useDeviceStatus();
   const [pinning, setPinning] = useState(false);
   const [pinned, setPinned] = useState<UiNodeInfo | null>(null);
   const [pinError, setPinError] = useState<string | null>(null);
-  const [picked, setPicked] = useState<string | null>(null);
+  const [picked, setPicked] = useState<string | null>(serial);
+  useEffect(() => { if (serial) setPicked(serial); }, [serial]);
   const [log, setLog] = useState<string[]>([]);
   const [text, setText] = useState("");
   const devices = status?.devices ?? [];

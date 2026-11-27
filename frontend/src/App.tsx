@@ -9,7 +9,8 @@ import { classifyEvent } from "./events";
 import { AppRunPanel } from "./components/AppRunPanel";
 import { connectEvents } from "./ws";
 import {
-  blockReason, jobAfterStart, jobsFromServer, laneBlocker, progressJob, removeJob, upsertJob,
+  addJobLog, blockReason, jobAfterStart, jobsFromServer, laneBlocker, logsFor, progressJob, removeJob, upsertJob,
+  type JobLog,
 } from "./jobState";
 import { Sidebar, type Section } from "./components/Sidebar";
 import { RunBar } from "./components/RunBar";
@@ -17,6 +18,7 @@ import { RunSettings } from "./components/RunSettings";
 import { ItemTable } from "./components/ItemTable";
 import { ImportDialog } from "./components/ImportDialog";
 import { DevicePanel } from "./components/DevicePanel";
+import { PairTabs } from "./components/PairTabs";
 import { ExportZipDialog, type ZipAudio } from "./components/ExportZipDialog";
 import { clickRow, emptySelection, prune, toggleAllVisible, type Selection } from "./selection";
 
@@ -59,7 +61,7 @@ export default function App() {
   const [appRuns, setAppRuns] = useState<AppRun[]>([]);
   const [appRunId, setAppRunId] = useState<number | null>(null);
   const [appResults, setAppResults] = useState<Map<number, AppResult>>(new Map());
-  const [jobLogs, setJobLogs] = useState<string[]>([]);
+  const [jobLogs, setJobLogs] = useState<JobLog[]>([]);
   const appRunRef = useRef<number | null>(null);
   appRunRef.current = appRunId;
   const setIdRef = useRef<number | null>(null);
@@ -209,7 +211,7 @@ export default function App() {
       track();
     } else if (kind === "log") {
       const time = new Date().toLocaleTimeString("vi-VN");
-      setJobLogs((l) => [...l, `${time} ${e.message}`].slice(-300));
+      setJobLogs((l) => addJobLog(l, e, time));
     } else if (kind === "progress") {
       track();
     } else {
@@ -250,11 +252,11 @@ export default function App() {
   const visibleSelectable = visible.filter(isSelectable).map((i) => i.id);
   const selectedIds = selection.ids.size ? [...selection.ids] : null;
 
-  const startApp = async (serial: string, profile: string) => {
+  const startApp = async (serial: string, profile: string, serial2?: string) => {
     if (setId === null) return;
     try {
       setJobLogs([]);
-      const r = await api.startAppRun(setId, serial, profile, sel2.ids.size ? [...sel2.ids] : null);
+      const r = await api.startAppRun(setId, serial, profile, sel2.ids.size ? [...sel2.ids] : null, serial2);
       setJobs((js) => upsertJob(js, jobAfterStart(r.job_id, finishedJobs.current, "block2", setId)));
       await loadAppRuns(setId, r.id);
     } catch (e) {
@@ -387,6 +389,9 @@ export default function App() {
   const anyJob = jobs[0] ?? null;
   const current = sets.find((s) => s.id === setId);
   const currentRun = appRuns.find((r) => r.id === appRunId);
+  const pairRun = currentRun?.pair_run_id ? appRuns.find((r) => r.id === currentRun.pair_run_id) : undefined;
+  // Both runs of one job in a fixed order (the older run = the first phone picked).
+  const pair = currentRun && pairRun ? ([currentRun, pairRun].sort((a, b) => a.id - b.id) as [AppRun, AppRun]) : null;
   const listedItems = items.filter(step2Listed);
   const readyCount = items.filter(step2Selectable).length;
   const summary = appMode ? countBy(listedItems, (it) => appResults.get(it.id)?.status) : countBy(items, (it) => it.status);
@@ -413,6 +418,7 @@ export default function App() {
         <span className="kpi ok"><b>{formatPct(passRate(currentRun.summary["Đúng"] ?? 0, currentRun.summary["Sai"] ?? 0))}</b> Đúng</span>
         <span className="kpi muted">#{currentRun.id} · {currentRun.device_model ?? currentRun.serial}
           {currentRun.app_version ? ` · app ${currentRun.app_version}` : ""}</span>
+        {pair && <PairTabs runs={pair} devices={devices} current={currentRun.id} onSelect={setAppRunId} />}
       </>
     );
   } else if (current) {
@@ -526,7 +532,8 @@ export default function App() {
       </main>
       {appMode && (
         <DevicePanel
-          jobLogs={jobLogs}
+          jobLogs={logsFor(jobLogs, appRunId)}
+          serial={currentRun?.serial ?? null}
           profile={profiles[0] ?? null}
           onProfileSaved={(p) => { setProfiles((ps) => ps.map((x) => (x.name === p.name ? p : x))); notify(`Đã lưu hồ sơ ${p.name}`); }}
         />

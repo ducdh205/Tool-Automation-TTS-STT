@@ -48,3 +48,16 @@ export function blockReason(blocker: Job | null, lane: JobLane): string | null {
     ? `Đang chạy: ${blocker.name}`
     : `Đang chạy: ${blocker.name} trên cùng bộ audio — đợi xong hoặc dừng job đó`;
 }
+
+/** One line of a running job's log; ``runId`` = the phone it is about (null = the whole job). */
+export interface JobLog { runId: number | null; line: string }
+const MAX_LOG_LINES = 600; // two phones × the 300 lines one phone kept
+
+export function addJobLog(logs: JobLog[], e: ProgressEvent, time: string): JobLog[] {
+  return [...logs, { runId: e.run_id ?? null, line: `${time} ${e.message}` }].slice(-MAX_LOG_LINES);
+}
+
+/** What the log panel shows for the run on screen: its own lines and the job-wide ones. */
+export function logsFor(logs: JobLog[], runId: number | null): string[] {
+  return logs.filter((l) => runId === null || l.runId === null || l.runId === runId).map((l) => l.line);
+}
