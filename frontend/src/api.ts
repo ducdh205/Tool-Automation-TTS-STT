@@ -52,7 +52,7 @@ export type DeviceInputBody =
   | { action: "swipe"; x: number; y: number; x2: number; y2: number; duration_ms?: number }
   | { action: "key"; key: DeviceKey }
   | { action: "text"; text: string };
-export interface DeviceStatus { adb: boolean; ios?: boolean; error: string | null; devices: DeviceInfo[]; busy?: string | null }
+export interface DeviceStatus { adb: boolean; ios?: boolean; error: string | null; devices: DeviceInfo[]; busy?: string[] }
 /** GET/POST /api/ios/connect — the "Kết nối iPhone" button (starts WebDriverAgent + port forward). */
 export interface IosConnect {
   state: "idle" | "starting" | "running" | "error"; step: string | null; error: string | null; detail: string | null;
@@ -69,6 +69,8 @@ export interface TtsDevice {
 export interface ProgressEvent {
   job_id: string; kind: "item" | "progress" | "log" | "done" | "error" | "cancelled";
   done: number; total: number; item: Item | AppResult | null; message: string | null; lane?: JobLane | null;
+  /** Block 2: the run (phone) this event is about; none = about the whole job. */
+  run_id?: number | null;
 }
 
 export interface AppProfile {
@@ -88,6 +90,8 @@ export interface AppRun {
   app_version: string | null; created_at: string; summary: Record<string, number>;
   /** A result is "Đúng" when its MER (0..1) is at most this. */
   wer_threshold: number;
+  /** The other phone's run when both ran in one job. */
+  pair_run_id?: number | null;
 }
 export interface AppResult {
   id: number; app_run_id: number; item_id: number; status: AppStatus; app_text: string | null;
@@ -185,9 +189,9 @@ export const api = {
   saveProfile: (p: AppProfile) => req<AppProfile>("PUT", `/api/profiles/${encodeURIComponent(p.name)}`, p),
   appRuns: (setId: number) => req<AppRun[]>("GET", `/api/audio-sets/${setId}/app-runs`),
   appResults: (runId: number) => req<AppResult[]>("GET", `/api/app-runs/${runId}/results`),
-  startAppRun: (setId: number, serial: string, profile: string, itemIds: number[] | null) =>
-    req<{ id: number; job_id: string }>("POST", `/api/audio-sets/${setId}/app-runs`,
-      { serial, profile, item_ids: itemIds }),
+  startAppRun: (setId: number, serial: string, profile: string, itemIds: number[] | null, serial2?: string | null) =>
+    req<{ id: number; pair_id?: number | null; job_id: string }>("POST", `/api/audio-sets/${setId}/app-runs`,
+      { serial, profile, item_ids: itemIds, ...(serial2 ? { serial2 } : {}) }),
   downloadFormReport: (runId: number) =>
     downloadFile(`/api/app-runs/${runId}/form-report`, undefined, `KetQua_Phien${runId}.xlsx`),
   /** The server builds the zip, then the browser follows a one-time link: it streams the file

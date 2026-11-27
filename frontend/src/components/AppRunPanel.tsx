@@ -15,7 +15,8 @@ interface Props {
   readyCount: number;
   /** Rows picked in the Step 2 table (0 = run every row with audio). */
   selectedCount: number;
-  onStart: (serial: string, profile: string) => void;
+  /** ``serial2``: a second phone that hears the same playback (one run per phone). */
+  onStart: (serial: string, profile: string, serial2?: string) => void;
   /** Saves an edited profile (the pause between sentences lives on the app profile). */
   onSaveProfile?: (profile: AppProfile) => Promise<void>;
   onExportForm: () => void;
@@ -33,14 +34,24 @@ const MAX_GAP_S = 60;
 
 const RECENT_RUNS = 5;
 const MORE = "__more__";
+const PAIR = "__pair__";
+const phoneName = (d: DeviceInfo) => d.model ?? d.serial;
 const runLabel = (r: AppRun) => `#${r.id} · ${r.device_model ?? r.serial} · ${r.created_at.slice(5, 16).replace("T", " ")}`;
 
 /** Step 2 actions, rendered inside the RunBar toolbar: start a run on the left, past runs and exports on the right. */
 export function AppRunPanel(p: Props) {
   const ready = p.devices.filter((d) => d.state === "device");
   const [serial, setSerial] = useState<string>("");
+  const [second, setSecond] = useState<string>("");
   const [profile, setProfile] = useState<string>("");
-  useEffect(() => { if (!ready.some((d) => d.serial === serial)) setSerial(ready[0]?.serial ?? ""); }, [ready, serial]);
+  const pairMode = serial === PAIR && ready.length > 1;
+  useEffect(() => {
+    if (!(serial === PAIR && ready.length > 1) && !ready.some((d) => d.serial === serial)) setSerial(ready[0]?.serial ?? "");
+  }, [ready, serial]);
+  // Both phones: the first ready one plus the one picked (the only other one when there are two).
+  const others = ready.slice(1);
+  useEffect(() => { if (!others.some((d) => d.serial === second)) setSecond(others[0]?.serial ?? ""); }, [others, second]);
+  const first = pairMode ? ready[0].serial : serial;
   useEffect(() => { if (!profile && p.profiles[0]) setProfile(p.profiles[0].name); }, [p.profiles, profile]);
 
   const current = p.profiles.find((x) => x.name === profile);
@@ -85,7 +96,7 @@ export function AppRunPanel(p: Props) {
   const canStart = !!serial && !!profile && !p.busy && p.readyCount > 0;
   // Picking cases while a run is shown means "run these again": keep them in that run.
   const rerun = !!run && p.selectedCount > 0 && !!p.onRerun;
-  const samePhone = !!run && run.serial === serial;
+  const samePhone = !!run && !pairMode && run.serial === serial;
 
   // Past runs: only the newest few until asked for more; the selected run always stays listed.
   const [showAllRuns, setShowAllRuns] = useState(false);
@@ -98,7 +109,13 @@ export function AppRunPanel(p: Props) {
       {ready.length === 0 && <span className="muted small">Chưa có thiết bị</span>}
       {ready.length > 1 && (
         <select className="compact-select" aria-label="Thiết bị" value={serial} onChange={(e) => setSerial(e.target.value)}>
-          {ready.map((d) => <option key={d.serial} value={d.serial}>{d.model ?? d.serial}</option>)}
+          {ready.map((d) => <option key={d.serial} value={d.serial}>{phoneName(d)}</option>)}
+          <option value={PAIR}>{ready.length === 2 ? `Cả 2 máy (${phoneName(ready[0])} + ${phoneName(ready[1])})` : "Cả 2 máy"}</option>
+        </select>
+      )}
+      {pairMode && ready.length > 2 && (
+        <select className="compact-select" aria-label="Máy thứ hai" value={second} onChange={(e) => setSecond(e.target.value)}>
+          {others.map((d) => <option key={d.serial} value={d.serial}>{phoneName(d)}</option>)}
         </select>
       )}
       <select className="compact-select" aria-label="Hồ sơ app" title="Hồ sơ app" value={profile}
@@ -127,9 +144,10 @@ export function AppRunPanel(p: Props) {
           <Icon name="refresh" />Chạy lại ({p.selectedCount}) vào #{run.id}
         </button>
       )}
-      <button className={`btn ${rerun ? "" : "primary"}`} disabled={!canStart} onClick={() => p.onStart(serial, profile)}
+      <button className={`btn ${rerun ? "" : "primary"}`} disabled={!canStart} onClick={() => (pairMode ? p.onStart(first, profile, second) : p.onStart(serial, profile))}
         title={p.blockedReason ?? (p.readyCount ? (rerun ? "Tạo lần test mới chỉ gồm các case đã chọn" : "") : "Sinh audio ở Khối 1 trước")}>
-        <Icon name="play" />{rerun ? `Lần test mới (${p.selectedCount})` : `Chạy trên app (${p.selectedCount || "tất cả"})`}
+        <Icon name="play" />{rerun ? `Lần test mới (${p.selectedCount})`
+          : pairMode ? `Chạy trên 2 máy (${p.selectedCount || "tất cả"})` : `Chạy trên app (${p.selectedCount || "tất cả"})`}
       </button>
       <Popover iconOnly buttonClassName="info-btn" panelLabel="Chuẩn bị trước khi chạy" label={<Icon name="info" />}>
         {() => (

@@ -47,6 +47,31 @@ describe("AppRunPanel", () => {
     fireEvent.click(screen.getByText("Chạy trên app (tất cả)"));
     expect(onStart).toHaveBeenCalledWith("T", "Vita Work (dev)");
   });
+  it("offers both phones when two are ready", () => {
+    const onStart = vi.fn();
+    const devices = [{ serial: "S1", state: "device", model: "M1", platform: "android" as const },
+      { serial: "S2", state: "device", model: "M2", platform: "ios" as const }];
+    render(<AppRunPanel {...panel({ devices, onStart })} />);
+    fireEvent.change(screen.getByRole("combobox", { name: "Thiết bị" }), { target: { value: "__pair__" } });
+    expect(screen.getByRole("option", { name: "Cả 2 máy (M1 + M2)" })).toBeTruthy();
+    fireEvent.click(screen.getByText(/2 máy/, { selector: "button" }));
+    expect(onStart).toHaveBeenCalledWith("S1", "Vita Work (dev)", "S2");
+  });
+  it("asks for the second phone when more than two are ready", () => {
+    const onStart = vi.fn();
+    const devices = ["A", "B", "C"].map((s) => ({ serial: s, state: "device", model: `M${s}` }));
+    render(<AppRunPanel {...panel({ devices, onStart })} />);
+    fireEvent.change(screen.getByRole("combobox", { name: "Thiết bị" }), { target: { value: "__pair__" } });
+    const second = screen.getByRole("combobox", { name: "Máy thứ hai" }) as HTMLSelectElement;
+    expect([...second.options].map((o) => o.value)).toEqual(["B", "C"]);
+    fireEvent.change(second, { target: { value: "C" } });
+    fireEvent.click(screen.getByText(/2 máy/, { selector: "button" }));
+    expect(onStart).toHaveBeenCalledWith("A", "Vita Work (dev)", "C");
+  });
+  it("has no pair option with one phone", () => {
+    render(<AppRunPanel {...panel()} />);
+    expect(screen.queryByRole("option", { name: /Cả 2 máy/ })).toBeNull();
+  });
   it("offers resume for the cases left over", () => {
     const onResume = vi.fn();
     render(<AppRunPanel {...panel({ runs: [run], runId: 7, onResume })} />);

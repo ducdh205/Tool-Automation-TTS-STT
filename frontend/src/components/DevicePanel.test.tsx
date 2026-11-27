@@ -8,7 +8,7 @@ const profile = { name: "P", package: "p", open_label: "a", stop_label: "b", idl
 describe("DevicePanel lock (review2 #4)", () => {
   it("locks manual control and pin mode while a block 2 job drives the phone", async () => {
     vi.spyOn(api, "device").mockResolvedValue({
-      adb: true, error: null, devices: [{ serial: "S", state: "device", model: "M" }], busy: "S",
+      adb: true, error: null, devices: [{ serial: "S", state: "device", model: "M" }], busy: ["S"],
     } as never);
     globalThis.fetch = vi.fn().mockResolvedValue(new Response(new Blob(["x"]), { status: 200 })) as never;
     globalThis.URL.createObjectURL = () => "blob:x";

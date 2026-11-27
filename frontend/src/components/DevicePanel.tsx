@@ -158,7 +158,7 @@ export function DevicePanel({ jobLogs = [], profile = null, onProfileSaved }: Pr
 
   const online = current?.state === "device";
   const ios = current?.platform === "ios";
-  const locked = !!current && status?.busy === current.serial; // a block 2 job drives this phone
+  const locked = !!current && !!status?.busy?.includes(current.serial); // a block 2 job drives this phone
   const send = async (b: DeviceInputBody) => {
     if (!current || locked) return;
     if (pinning && b.action === "tap") {
