@@ -262,3 +262,20 @@ async def test_fast_lane_starts_later(env, fast_poll):
     assert spk.calls == 3
     for i in (1, 2):  # from the 2nd sentence the fast phone waits for the slow one before its mic tap
         assert spk.times[i] - fast.mic_on[i] < 0.1
+
+
+async def test_lanes_with_different_audio_do_not_share_a_playback(env, tmp_path):
+    """After "Sinh lại", one run may hold another WAV for the same sentence: play each its own."""
+    import sqlite3
+
+    store, a, b, settings = env
+    w = wavs(store, a)
+    other = tmp_path / "other.wav"
+    other.write_bytes(b"RIFF")
+    row_b = store.app_results(b)[0]
+    with sqlite3.connect(tmp_path / "t.db") as c:
+        c.execute("UPDATE app_results SET audio_snap=? WHERE id=?", (str(other), row_b["id"]))
+    att = scripted_attempt({}, "x")
+    await go(store, [Lane(a, object()), Lane(b, object())], settings, att)
+    assert att.calls[:2] == [(w[0], (a,)), ("other.wav", (b,))]
+    assert att.calls[2:] == [(w[1], (a, b)), (w[2], (a, b))]

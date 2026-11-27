@@ -519,8 +519,14 @@ async def run_block2_multi(
     """
     attempt = attempt or default_attempt(profile)
     multi = len(lanes) > 1
-    pending = [{r["item_id"]: r for r in store.pending_for_block2(lane.run_id)} for lane in lanes]
-    item_ids = sorted(set().union(*pending))
+    # One playback serves the lanes whose run holds the same WAV for that sentence (after "Sinh lại"
+    # a run may still hold the old one): key each sentence by item and audio file.
+    pending = [{(r["item_id"], r["audio_path"]): r for r in store.pending_for_block2(lane.run_id)} for lane in lanes]
+    first_lane = {}
+    for i, p in enumerate(pending):
+        for key in p:
+            first_lane.setdefault(key, i)
+    item_ids = sorted(first_lane, key=lambda k: (k[0], first_lane[k]))
     total = len(item_ids)
 
     def tag(lane: Lane) -> str:
