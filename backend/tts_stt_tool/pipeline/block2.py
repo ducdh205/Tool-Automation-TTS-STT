@@ -338,6 +338,7 @@ async def read_result(dev: DeviceDriver, p: AppProfile, base: list[UiNode], log:
 
 MAX_CONSECUTIVE_OP_ERRORS = 5
 NOT_HEARD_RETRIES = 1  # app says "Chưa nghe rõ": speak the sentence again this many times
+OP_ERROR_RETRIES = 1  # the tool could not drive the phone: try the sentence again this many times
 RETRY_PAUSE_S = 1.0
 
 
@@ -349,6 +350,66 @@ async def pause_unless_cancelled(seconds: float, cancel: asyncio.Event) -> None:
         await asyncio.wait_for(cancel.wait(), timeout=seconds)
     except TimeoutError:
         pass
+
+
+@dataclass
+class Lane:
+    """One phone in a Block 2 job: the run its results go to and the driver that works it."""
+
+    run_id: int
+    dev: DeviceDriver
+    shots_dir: Path | None = None
+    name: str = ""  # shown in messages (serial / model)
+    op_errors: int = 0  # consecutive operation errors
+    prep_s: float = 0.0  # how long its last ``prepare`` took (to line the mics up)
+
+
+Check = Callable[[str], bool] | None
+Attempt = Callable[[list[Lane], Path, AudioPlayer, list[Check]], Awaitable[list["AppCapture | BaseException"]]]
+
+
+def default_attempt(profile: AppProfile, sleep: Sleep = asyncio.sleep) -> Attempt:
+    """One try of a sentence on some phones: prepare them together, play once, read each."""
+
+    async def attempt(lanes: list[Lane], wav: Path, player: AudioPlayer, checks: list[Check]):
+        logs: list[list[str]] = [[] for _ in lanes]
+        loop = asyncio.get_running_loop()
+        slowest = max(lane.prep_s for lane in lanes)
+
+        async def prep(i: int, lane: Lane) -> None:
+            # A fast phone starts later so that its mic does not sit open (and time out) while
+            # the slow one is still getting ready.
+            if len(lanes) > 1 and slowest > lane.prep_s:
+                await asyncio.sleep(slowest - lane.prep_s)
+            t = loop.time()
+            await prepare(lane.dev, profile, logs[i], sleep)
+            lane.prep_s = loop.time() - t
+
+        out: list[AppCapture | BaseException | None] = list(
+            await asyncio.gather(*(prep(i, lane) for i, lane in enumerate(lanes)), return_exceptions=True))
+        if len(lanes) > 1:
+            for i, lane in enumerate(lanes):
+                if out[i] is None and await lane.dev.mic_active() is False:
+                    logs[i].append("Mic đã tắt trước khi phát")
+                    out[i] = OperationError("Mic đã tắt trước khi phát")
+        live = [i for i, o in enumerate(out) if o is None]
+        if live:
+            bases = await speak([lanes[i].dev for i in live], wav, player, [logs[i] for i in live])
+
+            async def read(i: int, base: list[UiNode] | BaseException) -> AppCapture:
+                if isinstance(base, BaseException):
+                    raise base
+                return await read_result(lanes[i].dev, profile, base, logs[i], sleep, checks[i])
+
+            reads = await asyncio.gather(*(read(i, b) for i, b in zip(live, bases)), return_exceptions=True)
+            for i, r in zip(live, reads):
+                out[i] = r
+        for i, o in enumerate(out):
+            if isinstance(o, BaseException):
+                o.log = logs[i]  # type: ignore[attr-defined]
+        return out
+
+    return attempt
 
 
 async def run_block2(
@@ -364,82 +425,163 @@ async def run_block2(
     shots_dir: Path | None = None,
     pause: Callable[[float, asyncio.Event], Awaitable[None]] = pause_unless_cancelled,
 ) -> None:
-    """Run every pending sentence; with ``shots_dir``, failures leave a ``<result id>.png`` there.
+    """One phone: ``run_block2_multi`` with a single lane, each try being one ``run_one`` call."""
 
-    ``profile.between_delay_s`` separates two sentences (not before the first, not after the last).
-    """
-
-    def save_shot(result_id: int, png: bytes | None, log: list[str]) -> str | None:
-        if png is None or shots_dir is None:
-            return None
+    async def attempt(lanes: list[Lane], wav: Path, player: AudioPlayer, checks: list[Check]):
+        kw = {"is_correct": checks[0]} if checks[0] is not None else {}
         try:
-            shots_dir.mkdir(parents=True, exist_ok=True)
-            # a re-run keeps the earlier attempt's photo (its history points at it)
-            path = shots_dir / f"{result_id}.png"
-            n = 2
-            while path.exists():
-                path = shots_dir / f"{result_id}_{n}.png"
-                n += 1
-            path.write_bytes(png)
-        except OSError as e:  # disk full, antivirus lock: the result matters more than its photo
-            log.append(f"Không lưu được ảnh: {e}")
-            return None
-        return str(path.resolve())
+            return [await run_one(lanes[0].dev, profile, wav, player, **kw)]
+        except Exception as e:  # noqa: BLE001 — recorded as an operation error by the loop
+            return [e]
 
-    todo = store.pending_for_block2(app_run_id)
-    total = len(todo)
-    op_errors = 0
-    for done, row in enumerate(todo):
+    await run_block2_multi(store, [Lane(app_run_id, dev, shots_dir)], profile, player, settings, emit, cancel,
+                           attempt=attempt, pause=pause)
+
+
+def _save_shot(shots_dir: Path | None, result_id: int, png: bytes | None, log: list[str]) -> str | None:
+    if png is None or shots_dir is None:
+        return None
+    try:
+        shots_dir.mkdir(parents=True, exist_ok=True)
+        # a re-run keeps the earlier attempt's photo (its history points at it)
+        path = shots_dir / f"{result_id}.png"
+        n = 2
+        while path.exists():
+            path = shots_dir / f"{result_id}_{n}.png"
+            n += 1
+        path.write_bytes(png)
+    except OSError as e:  # disk full, antivirus lock: the result matters more than its photo
+        log.append(f"Không lưu được ảnh: {e}")
+        return None
+    return str(path.resolve())
+
+
+async def _tries(attempt: Attempt, todo: list[tuple[Lane, dict]], wav: Path, player: AudioPlayer,
+                 checks: list[Check], profile: AppProfile, emit: Emit, cancel: asyncio.Event,
+                 pause: Callable[[float, asyncio.Event], Awaitable[None]], label: str, tag: Callable[[Lane], str],
+                 done: int, total: int) -> list[AppCapture | BaseException]:
+    """Try one sentence until each lane has its answer; the lanes needing a retry retry together."""
+    final: dict[int, AppCapture | BaseException] = {}
+    logs: dict[int, list[str]] = {k: [] for k in range(len(todo))}
+    not_heard = dict.fromkeys(range(len(todo)), 0)
+    op = dict.fromkeys(range(len(todo)), 0)
+    active = list(range(len(todo)))
+    while active:
+        outs = await attempt([todo[k][0] for k in active], wav, player, [checks[k] for k in active])
+        retry: list[int] = []
+        for k, out in zip(active, outs):
+            lane = todo[k][0]
+            logs[k].extend(out.log if isinstance(out, AppCapture) else (getattr(out, "log", None) or []))
+            if cancel.is_set():
+                final[k] = out
+            elif isinstance(out, BaseException) and op[k] < OP_ERROR_RETRIES:
+                op[k] += 1
+                logs[k].append("— Thử lại sau lỗi thao tác —")
+                emit(ProgressEvent("", "log", done, total, run_id=lane.run_id,
+                                   message=f"{label}{tag(lane)}: Lỗi thao tác — {out or type(out).__name__} → thử lại"))
+                retry.append(k)
+            elif (isinstance(out, AppCapture) and out.not_heard and not out.text
+                  and not_heard[k] < NOT_HEARD_RETRIES):
+                not_heard[k] += 1
+                n = not_heard[k] + 1
+                logs[k].append(f"— Phát lại lần {n} —")
+                emit(ProgressEvent("", "log", done, total, run_id=lane.run_id,
+                                   message=f"{label}{tag(lane)}: app báo '{profile.not_heard_label}' → phát lại lần {n}"))
+                retry.append(k)
+            else:
+                final[k] = out
+        active = retry
+        if active:
+            await pause(RETRY_PAUSE_S, cancel)
+    for k, out in final.items():
+        out.log = logs[k]  # type: ignore[union-attr]
+    return [final[k] for k in range(len(todo))]
+
+
+async def run_block2_multi(
+    store: Store,
+    lanes: list[Lane],
+    profile: AppProfile,
+    player: AudioPlayer,
+    settings: Settings,
+    emit: Emit,
+    cancel: asyncio.Event,
+    attempt: Attempt | None = None,
+    pause: Callable[[float, asyncio.Event], Awaitable[None]] = pause_unless_cancelled,
+) -> None:
+    """Run every pending sentence of every lane; each sentence is played once for all its lanes.
+
+    A lane whose app said "Chưa nghe rõ", or which hit an operation error, tries again on its own
+    while the others wait (lanes needing a retry retry together). One lane reaching
+    ``MAX_CONSECUTIVE_OP_ERRORS`` stops them all. With a lane's ``shots_dir``, its failures leave
+    ``<result id>.png`` there. ``profile.between_delay_s`` separates two sentences (not before the
+    first, not after the last).
+    """
+    attempt = attempt or default_attempt(profile)
+    multi = len(lanes) > 1
+    pending = [{r["item_id"]: r for r in store.pending_for_block2(lane.run_id)} for lane in lanes]
+    item_ids = sorted(set().union(*pending))
+    total = len(item_ids)
+
+    def tag(lane: Lane) -> str:
+        return f" [{lane.name or lane.run_id}]" if multi else ""
+
+    for done, item_id in enumerate(item_ids):
         if done and profile.between_delay_s > 0 and not cancel.is_set():
             await pause(profile.between_delay_s, cancel)
         if cancel.is_set():
             emit(ProgressEvent("", "cancelled", done, total))
             return
-        label = f"[{done + 1}/{total}] {row['tc_id']}"
-        # read per sentence: the user may change the run's threshold while it goes
-        threshold = (store.get_app_run(app_run_id) or {}).get("wer_threshold", 0.0)
-        emit(ProgressEvent("", "log", done, total, message=f"{label}: {row['text_tts']}"))
-        try:
-            if not row["audio_path"] or not Path(row["audio_path"]).is_file():
-                raise OperationError("Không có file audio của câu này (chạy lại Khối 1)")
-            kw = {}
-            if shots_dir is not None:
-                text_tts = row["text_tts"]
-                kw["is_correct"] = lambda heard, t=text_tts: compare(t, heard, threshold).correct
-            cap = await run_one(dev, profile, Path(row["audio_path"]), player, **kw)
-            for attempt in range(NOT_HEARD_RETRIES):
-                if not cap.not_heard or cap.text or cancel.is_set():
-                    break
-                note = f"{label}: app báo '{profile.not_heard_label}' → phát lại lần {attempt + 2}"
-                emit(ProgressEvent("", "log", done, total, message=note))
-                await pause(RETRY_PAUSE_S, cancel)
-                first_log = cap.log
-                cap = await run_one(dev, profile, Path(row["audio_path"]), player, **kw)
-                cap.log = [*first_log, f"— Phát lại lần {attempt + 2} —", *cap.log]
-        except Exception as e:  # OperationError, adb failures: the tool, not the app, failed
-            op_errors += 1
-            msg = str(e) or type(e).__name__
-            log = list(getattr(e, "log", []) or [])
-            # Photograph the screen as the failure left it, before the next sentence recovers it.
-            png = await _try_screencap(dev, log) if shots_dir is not None else None
-            shot_path = save_shot(row["id"], png, log)
-            store.record_app_result(row["id"], AppStatus.OP_ERROR, None, None, msg, "\n".join(log),
+        todo = [(lane, p[item_id]) for lane, p in zip(lanes, pending) if item_id in p]
+        first = todo[0][1]
+        label = f"[{done + 1}/{total}] {first['tc_id']}"
+        emit(ProgressEvent("", "log", done, total, message=f"{label}: {first['text_tts']}",
+                           run_id=todo[0][0].run_id if len(todo) == 1 else None))
+        # read per sentence: the user may change a run's threshold while it goes
+        thresholds = [(store.get_app_run(lane.run_id) or {}).get("wer_threshold", 0.0) for lane, _ in todo]
+        checks: list[Check] = [
+            (lambda heard, t=row["text_tts"], th=th: compare(t, heard, th).correct) if lane.shots_dir else None
+            for (lane, row), th in zip(todo, thresholds)]
+        if not first["audio_path"] or not Path(first["audio_path"]).is_file():
+            outs: list[AppCapture | BaseException] = [
+                OperationError("Không có file audio của câu này (chạy lại Khối 1)") for _ in todo]
+        else:
+            outs = await _tries(attempt, todo, Path(first["audio_path"]), player, checks, profile, emit, cancel,
+                                pause, label, tag, done, total)
+
+        stop: tuple[Lane, str] | None = None
+        for (lane, row), out, th in zip(todo, outs, thresholds):
+            if isinstance(out, BaseException):
+                lane.op_errors += 1
+                msg = str(out) or type(out).__name__
+                log = list(getattr(out, "log", []) or [])
+                # Photograph the screen as the failure left it, before the next sentence recovers it.
+                png = await _try_screencap(lane.dev, log) if lane.shots_dir is not None else None
+                shot_path = _save_shot(lane.shots_dir, row["id"], png, log)
+                store.record_app_result(row["id"], AppStatus.OP_ERROR, None, None, msg, "\n".join(log),
+                                        screenshot_path=shot_path)
+                emit(ProgressEvent("", "log", done + 1, total, run_id=lane.run_id,
+                                   message=f"{label}{tag(lane)}: Lỗi thao tác — {msg}"))
+                emit(ProgressEvent("", "item", done + 1, total, item=store.get_app_result(row["id"]),
+                                   run_id=lane.run_id))
+                if lane.op_errors >= MAX_CONSECUTIVE_OP_ERRORS and stop is None:
+                    stop = (lane, msg)
+                continue
+            lane.op_errors = 0
+            heard = out.text or ""
+            result = compare(row["text_tts"], heard, th)
+            status = AppStatus.PASSED if result.correct else AppStatus.FAILED
+            shot_path = _save_shot(lane.shots_dir, row["id"], out.screenshot, out.log)
+            store.record_app_result(row["id"], status, heard, result, None, "\n".join(out.log),
                                     screenshot_path=shot_path)
-            emit(ProgressEvent("", "log", done + 1, total, message=f"{label}: Lỗi thao tác — {msg}"))
-            emit(ProgressEvent("", "item", done + 1, total, item=store.get_app_result(row["id"])))
-            if op_errors >= MAX_CONSECUTIVE_OP_ERRORS:
-                emit(ProgressEvent("", "error", done + 1, total,
-                                   message=f"Dừng sau {MAX_CONSECUTIVE_OP_ERRORS} lỗi thao tác liên tiếp: {msg}"))
-                return
-            continue
-        op_errors = 0
-        heard = cap.text or ""
-        result = compare(row["text_tts"], heard, threshold)
-        status = AppStatus.PASSED if result.correct else AppStatus.FAILED
-        shot_path = save_shot(row["id"], cap.screenshot, cap.log)
-        store.record_app_result(row["id"], status, heard, result, None, "\n".join(cap.log),
-                                screenshot_path=shot_path)
-        for line in cap.log:
-            emit(ProgressEvent("", "log", done, total, message=line))
-        emit(ProgressEvent("", "item", done + 1, total, item=store.get_app_result(row["id"])))
+            for line in out.log:
+                emit(ProgressEvent("", "log", done, total, message=line, run_id=lane.run_id))
+            emit(ProgressEvent("", "item", done + 1, total, item=store.get_app_result(row["id"]),
+                               run_id=lane.run_id))
+        if stop is not None:
+            lane, msg = stop
+            where = f" trên máy {lane.name or lane.run_id}" if multi else ""
+            emit(ProgressEvent("", "error", done + 1, total,
+                               message=f"Dừng sau {MAX_CONSECUTIVE_OP_ERRORS} lỗi thao tác liên tiếp{where}: {msg}"))
+            return
     emit(ProgressEvent("", "done", total, total))

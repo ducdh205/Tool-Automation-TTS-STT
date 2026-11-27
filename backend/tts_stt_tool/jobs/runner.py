@@ -29,6 +29,7 @@ class ProgressEvent:
     total: int
     item: dict | None = None
     message: str | None = None
+    run_id: int | None = None  # Block 2: the run (phone) this event is about
     lane: Lane | None = None  # filled in by the runner
 
     def to_json(self) -> dict[str, Any]:

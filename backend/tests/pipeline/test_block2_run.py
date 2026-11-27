@@ -276,3 +276,20 @@ async def test_heard_text_is_not_retried(env):
     fake = sequenced({wav: ["tắt đen"]})
     await go(store, run_id, settings, fake)
     assert fake.calls[wav] == 1
+
+
+async def test_op_error_retried_once_then_passes(env):
+    store, run_id, settings = env
+    ids = {r["text_tts"]: r["item_id"] for r in store.app_results(run_id)}
+    wav = f"{ids['bật đèn']}.wav"
+    calls = []
+
+    async def fake(dev, profile, w, player, **_kw):
+        calls.append(w.name)
+        if w.name == wav and calls.count(wav) == 1:
+            raise OperationError("Mic không bật")
+        return AppCapture(text={f"{i}.wav": t for t, i in ids.items()}[w.name], log=[])
+
+    await go(store, run_id, settings, fake)
+    assert by_text(store, run_id)["bật đèn"]["status"] == AppStatus.PASSED.value
+    assert len(calls) == 8  # 7 sentences + one retry
