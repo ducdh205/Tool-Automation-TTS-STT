@@ -14,7 +14,7 @@ const STATE: Record<string, { label: string; level: Level }> = {
   device: { label: "Đã kết nối", level: "ok" },
   unauthorized: { label: "Chưa cho phép", level: "warn" },
   offline: { label: "Mất kết nối", level: "warn" },
-  no_wda: { label: "Chưa chạy WDA", level: "warn" },
+  no_wda: { label: "Chưa kết nối iPhone", level: "warn" },
 };
 
 /** Ready to test = reference STT up and at least one phone connected; else the first thing to fix. */
@@ -27,7 +27,7 @@ export function readiness(health: Health | null, device: DeviceStatus | null): {
   else if (device && !online && device.devices.some((d) => d.state === "unauthorized"))
     hint = 'Mở khóa điện thoại và bấm "Cho phép" gỡ lỗi USB';
   else if (device && !online && device.devices.some((d) => d.state === "no_wda"))
-    hint = "Chạy WebDriverAgent trên iPhone và chuyển cổng 8100";
+    hint = "Bấm \"Kết nối iPhone\" ở khung Thiết bị";
   return { ready: !!health?.wyoming && online, hint };
 }
 

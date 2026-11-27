@@ -9,6 +9,8 @@ interface Props {
   runs: AppRun[];
   runId: number | null;
   busy: boolean;
+  /** Why a run cannot start now (a conflicting job runs): shown as the start buttons' tooltip. */
+  blockedReason?: string | null;
   /** Rows with audio (verified or not): what a run without a selection tests. */
   readyCount: number;
   /** Rows picked in the Step 2 table (0 = run every row with audio). */
@@ -22,7 +24,7 @@ interface Props {
   /** Runs the picked cases again inside the selected run (its other results stay). */
   onRerun?: (runId: number, serial: string) => void;
   onSelectRun: (runId: number | null) => void;
-  /** Grades the selected run again: "Đúng" when WER ≤ the new threshold (0..1). */
+  /** Grades the selected run again: "Đúng" when MER ≤ the new threshold (0..1). */
   onSetThreshold?: (runId: number, werThreshold: number) => Promise<void>;
 }
 
@@ -61,7 +63,7 @@ export function AppRunPanel(p: Props) {
   };
 
   const run = p.runs.find((r) => r.id === p.runId);
-  // WER threshold of the shown run, in % (the API keeps 0..1)
+  // MER threshold of the shown run, in % (the API keeps 0..1)
   const savedWer = run ? String(Math.round(run.wer_threshold * 1000) / 10) : "";
   const [wer, setWer] = useState<string | null>(null); // null = show the saved value
   useEffect(() => setWer(null), [run?.id, savedWer]);
@@ -119,14 +121,14 @@ export function AppRunPanel(p: Props) {
       {rerun && run && (
         <button className="btn primary" disabled={!canStart || !samePhone}
           onClick={() => p.onRerun?.(run.id, serial)}
-          title={samePhone
+          title={p.blockedReason ?? (samePhone
             ? `Chạy lại ${p.selectedCount} case đã chọn trong lần test #${run.id}; kết quả các case khác giữ nguyên, kết quả cũ lưu vào lịch sử`
-            : `Lần test #${run.id} chạy trên máy ${run.device_model ?? run.serial}: chọn máy đó, hoặc tạo lần test mới`}>
+            : `Lần test #${run.id} chạy trên máy ${run.device_model ?? run.serial}: chọn máy đó, hoặc tạo lần test mới`)}>
           <Icon name="refresh" />Chạy lại ({p.selectedCount}) vào #{run.id}
         </button>
       )}
       <button className={`btn ${rerun ? "" : "primary"}`} disabled={!canStart} onClick={() => p.onStart(serial, profile)}
-        title={p.readyCount ? (rerun ? "Tạo lần test mới chỉ gồm các case đã chọn" : "") : "Sinh audio ở Khối 1 trước"}>
+        title={p.blockedReason ?? (p.readyCount ? (rerun ? "Tạo lần test mới chỉ gồm các case đã chọn" : "") : "Sinh audio ở Khối 1 trước")}>
         <Icon name="play" />{rerun ? `Lần test mới (${p.selectedCount})` : `Chạy trên app (${p.selectedCount || "tất cả"})`}
       </button>
       <Popover iconOnly buttonClassName="info-btn" panelLabel="Chuẩn bị trước khi chạy" label={<Icon name="info" />}>
@@ -149,10 +151,10 @@ export function AppRunPanel(p: Props) {
       </select>
       {p.onSetThreshold && run && (
         <label className="gap-field"
-          title={"Câu được chấm Đúng khi WER ≤ ngưỡng này (0% = phải khớp hoàn toàn). Đổi ngưỡng sẽ chấm lại"
+          title={"Câu được chấm Đúng khi MER ≤ ngưỡng này (0% = phải khớp hoàn toàn). Đổi ngưỡng sẽ chấm lại"
             + ` các câu đã chạy của lần test #${run.id}; lần test mới cũng dùng ngưỡng này.`}>
-          <span>Đúng khi WER ≤</span>
-          <input type="number" min={0} max={100} step={5} aria-label="Ngưỡng WER để chấm Đúng (%)"
+          <span>Đúng khi MER ≤</span>
+          <input type="number" min={0} max={100} step={5} aria-label="Ngưỡng MER để chấm Đúng (%)"
             aria-invalid={!werValid} value={werValue}
             onChange={(e) => setWer(e.target.value)} onBlur={() => void commitWer()}
             onKeyDown={(e) => {

@@ -99,6 +99,7 @@ class AppCapture:
     log: list[str] = field(default_factory=list)
     bubbles: list[str] = field(default_factory=list)  # user bubbles on screen at the end
     screenshot: bytes | None = None  # PNG taken before closing the sheet when the text is wrong
+    not_heard: bool = False  # the app said "Chưa nghe rõ" (nothing caught)
 
 
 async def _wait_for(dev: DeviceDriver, label: str, timeout_s: float, sleep: Sleep) -> list[UiNode] | None:
@@ -176,6 +177,12 @@ async def _wait_mic(dev: DeviceDriver, p: AppProfile, log: list[str], sleep: Sle
             break
         await sleep(MIC_POLL_S)
     raise OperationError(f"Mic không bật sau {p.listen_timeout_s:g}s (không thấy app thu âm)")
+
+
+def _shows_not_heard(nodes: list[UiNode], p: AppProfile) -> bool:
+    """The "Chưa nghe rõ. Thử lại hoặc gõ." notice (matched as a substring: the tail varies)."""
+    label = p.not_heard_label.strip()
+    return bool(label) and any(label in n.label for n in nodes)
 
 
 def _sheet_open(nodes: list[UiNode], p: AppProfile) -> bool:
@@ -258,6 +265,7 @@ async def _run_one(dev: DeviceDriver, p: AppProfile, wav: Path, player: AudioPla
 
     text: str | None = None
     on_form = False
+    not_heard = False
     nodes = base
     async for nodes in _poll(dev, p.result_timeout_s, sleep):
         if not _sheet_open(nodes, p):
@@ -271,6 +279,10 @@ async def _run_one(dev: DeviceDriver, p: AppProfile, wav: Path, player: AudioPla
         if bubble:
             text = bubble.label
             log.append(f"App nhận: {text}")
+            break
+        if _shows_not_heard(nodes, p):
+            not_heard = True
+            log.append(f"App báo '{p.not_heard_label}'")
             break
     else:
         log.append("App không trả câu nào")
@@ -297,10 +309,12 @@ async def _run_one(dev: DeviceDriver, p: AppProfile, wav: Path, player: AudioPla
     await dev.back()
     if on_form:
         await _discard_form(dev, p, log, sleep)
-    return AppCapture(text=text, log=log, bubbles=bubbles, screenshot=shot)
+    return AppCapture(text=text, log=log, bubbles=bubbles, screenshot=shot, not_heard=not_heard)
 
 
 MAX_CONSECUTIVE_OP_ERRORS = 5
+NOT_HEARD_RETRIES = 1  # app says "Chưa nghe rõ": speak the sentence again this many times
+RETRY_PAUSE_S = 1.0
 
 
 async def pause_unless_cancelled(seconds: float, cancel: asyncio.Event) -> None:
@@ -364,12 +378,20 @@ async def run_block2(
         try:
             if not row["audio_path"] or not Path(row["audio_path"]).is_file():
                 raise OperationError("Không có file audio của câu này (chạy lại Khối 1)")
-            if shots_dir is None:
-                cap = await run_one(dev, profile, Path(row["audio_path"]), player)
-            else:
+            kw = {}
+            if shots_dir is not None:
                 text_tts = row["text_tts"]
-                cap = await run_one(dev, profile, Path(row["audio_path"]), player,
-                                    is_correct=lambda heard: compare(text_tts, heard, threshold).correct)
+                kw["is_correct"] = lambda heard, t=text_tts: compare(t, heard, threshold).correct
+            cap = await run_one(dev, profile, Path(row["audio_path"]), player, **kw)
+            for attempt in range(NOT_HEARD_RETRIES):
+                if not cap.not_heard or cap.text or cancel.is_set():
+                    break
+                note = f"{label}: app báo '{profile.not_heard_label}' → phát lại lần {attempt + 2}"
+                emit(ProgressEvent("", "log", done, total, message=note))
+                await pause(RETRY_PAUSE_S, cancel)
+                first_log = cap.log
+                cap = await run_one(dev, profile, Path(row["audio_path"]), player, **kw)
+                cap.log = [*first_log, f"— Phát lại lần {attempt + 2} —", *cap.log]
         except Exception as e:  # OperationError, adb failures: the tool, not the app, failed
             op_errors += 1
             msg = str(e) or type(e).__name__

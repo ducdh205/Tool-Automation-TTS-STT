@@ -1,0 +1,28 @@
+TEST APP TRÊN iPHONE — CHUẨN BỊ MỘT LẦN
+=======================================
+
+Máy tính Windows (một lần cho mỗi máy)
+  1. Cài app "Apple Devices" từ Microsoft Store (hoặc iTunes). Đây là driver USB của Apple,
+     thiếu nó tool không thấy iPhone.
+  2. Lần kết nối đầu tiên (và sau mỗi lần iPhone khởi động lại) máy tính cần có Internet.
+
+iPhone (một lần cho mỗi máy)
+  1. Cắm iPhone vào máy tính, mở khóa, bấm "Tin cậy" và nhập mật mã.
+  2. Cài WebDriverAgent: mở Sideloadly (https://sideloadly.io), kéo file ios\WDA.ipa vào,
+     đăng nhập Apple ID, bấm Start.
+  3. Trên iPhone: Cài đặt → Cài đặt chung → Quản lý VPN & thiết bị → chọn Apple ID vừa dùng → Tin cậy.
+  4. Bật Chế độ nhà phát triển: Cài đặt → Quyền riêng tư & Bảo mật → Chế độ nhà phát triển → Bật.
+     iPhone khởi động lại, mở khóa và bấm "Bật" thêm lần nữa.
+     (Mục này chỉ hiện sau khi đã cài WDA ở bước 2.)
+
+Mỗi lần test
+  1. Chạy TTS-STT-Tool.bat, cắm iPhone, mở khóa.
+  2. Ở khung "Thiết bị" bấm "Kết nối iPhone" và chờ khoảng 10–60 giây.
+     Khi màn hình iPhone hiện trong tool là xong.
+  3. Để iPhone luôn mở khóa trong lúc test (Cài đặt → Màn hình & Độ sáng → Tự động khóa → Không bao giờ).
+
+Lưu ý
+  - Với Apple ID miễn phí, WDA chỉ dùng được 7 ngày. Hết hạn thì tool báo "chữ ký WDA có thể đã hết hạn":
+    làm lại bước 2 (Sideloadly) rồi bấm Kết nối lại.
+  - Tool báo lỗi kèm cách sửa ngay dưới nút. Bấm "Chi tiết kỹ thuật" nếu cần gửi cho người hỗ trợ.
+  - Nhật ký đầy đủ nằm ở data\ios\xcuitest.log và data\ios\forward.log.

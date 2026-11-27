@@ -106,7 +106,7 @@ export function RunSettings({ settings, busy, saving, setCount, onSave }: Props)
   const summary = (
     <>
       <Icon name="settings" />
-      <span className="ellipsis" title={voiceSummary}>{voiceSummary} · WER ≤ {value("wer")}% · {value("timeout")}s</span>
+      <span className="ellipsis" title={voiceSummary}>{voiceSummary} · MER ≤ {value("wer")}% · {value("timeout")}s</span>
       {changed && <span className="unsaved">chưa lưu</span>}
       <Icon name="chevron" size={13} />
     </>
@@ -158,8 +158,8 @@ export function RunSettings({ settings, busy, saving, setCount, onSave }: Props)
               </div>
               <div className="field">
                 <div className="label-row">
-                  <label htmlFor="run-wer">Ngưỡng WER để đạt (%)</label>
-                  <Popover iconOnly buttonClassName="info-btn" panelLabel="Cách chấm WER và CER" label={<Icon name="info" size={13} />}>
+                  <label htmlFor="run-wer">Ngưỡng MER để đạt (%)</label>
+                  <Popover iconOnly buttonClassName="info-btn" panelLabel="Cách chấm MER và CER" label={<Icon name="info" size={13} />}>
                     {() => <ScoringGuide />}
                   </Popover>
                 </div>
@@ -193,7 +193,7 @@ export function RunSettings({ settings, busy, saving, setCount, onSave }: Props)
                   onClick={(e) => e.stopPropagation()}>
                   <header><h2>Xóa tiến trình cũ?</h2></header>
                   <p>
-                    Audio đã sinh, kết quả STT/WER và các lần chạy app trong {setCount} bộ audio được tạo bằng
+                    Audio đã sinh, kết quả STT/MER và các lần chạy app trong {setCount} bộ audio được tạo bằng
                     cài đặt cũ. Lưu cài đặt và xóa toàn bộ tiến trình này, đưa mọi câu về "Chờ"? Danh sách câu
                     đã nạp được giữ lại. Không thể hoàn tác.
                   </p>

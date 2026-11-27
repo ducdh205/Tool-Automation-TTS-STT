@@ -6,7 +6,8 @@
   1. Build the web UI (frontend\dist).
   2. Copy two standalone Pythons (3.12 for the tool, 3.14.8 for wyoming) into dist\TTS-STT-Tool\runtime
      and install the locked libraries into them (uv.lock / vendor\wyoming-vietnamese\uv.lock).
-  3. Copy the tool source, adb, wyoming source, launch.py and TTS-STT-Tool.bat into the folder.
+  3. Copy the tool source, adb, go-ios + WDA.ipa (iPhone), wyoming source, launch.py and
+     TTS-STT-Tool.bat into the folder.
   4. Put every model into dist\TTS-STT-Tool\models (copied from this machine's caches, downloads
      what is missing). models\ and data\ are kept between builds.
   5. Smoke test: start the folder's app offline from a fresh data dir, synthesize + transcribe.
@@ -100,7 +101,8 @@ function New-Runtime($Version, $Dest, $ProjectDir, [string[]]$ExtraArgs = @(), [
 }
 
 # --- checks -------------------------------------------------------------------------------
-foreach ($p in @("$Wy\pyproject.toml", "$Wy\wyoming_vietnamese", "$Root\vendor\platform-tools\adb.exe")) {
+foreach ($p in @("$Wy\pyproject.toml", "$Wy\wyoming_vietnamese", "$Root\vendor\platform-tools\adb.exe",
+                  "$Root\vendor\go-ios\ios.exe", "$Root\vendor\go-ios\wintun.dll", "$Root\vendor\wda\WDA.ipa")) {
     if (-not (Test-Path $p)) { throw "Thiếu $p — làm bước cài đặt một lần trong README trước" }
 }
 if (-not (Get-Command uv -ErrorAction SilentlyContinue)) { throw 'Thiếu uv (https://docs.astral.sh/uv/)' }
@@ -120,7 +122,7 @@ if (-not (Test-Path "$Root\frontend\dist\index.html")) { throw 'Thiếu frontend
 # --- 2. clean stage (models are kept: they are big and rarely change) ----------------------
 Write-Step "Dọn $Stage (giữ models, data)"
 New-Item -ItemType Directory -Force $Stage | Out-Null
-foreach ($d in 'runtime', 'backend', 'frontend', 'vendor', 'launch.py', 'TTS-STT-Tool.bat') {
+foreach ($d in 'runtime', 'backend', 'frontend', 'vendor', 'ios', 'launch.py', 'TTS-STT-Tool.bat', 'HUONG-DAN-IPHONE.txt') {
     $p = Join-Path $Stage $d
     if (Test-Path $p) { Remove-Item $p -Recurse -Force }
 }
@@ -130,13 +132,20 @@ if ((Test-Path $oldModels) -and -not (Test-Path "$Stage\models")) { Move-Item $o
 
 # --- 3. runtimes ----------------------------------------------------------------------------
 New-Runtime '3.12' (Join-Path $Stage 'runtime\py312') $Root
+# iPhone: "Kết nối iPhone" runs pymobiledevice3 from this runtime (python -m pymobiledevice3).
+Invoke-Native { & $Py312 -m pymobiledevice3 version }
 New-Runtime '3.14.8' (Join-Path $Stage 'runtime\py314') $Wy @('--find-links', 'https://k2-fsa.github.io/icefall/piper_phonemize.html') -NoCheck
 
 # --- 4. app files ---------------------------------------------------------------------------
-Write-Step 'Copy mã nguồn, giao diện, adb, wyoming'
+Write-Step 'Copy mã nguồn, giao diện, adb, go-ios, wyoming'
 Copy-Tree "$Root\backend\tts_stt_tool" "$Stage\backend\tts_stt_tool" @('__pycache__')
 Copy-Tree "$Root\frontend\dist" "$Stage\frontend\dist"
 Copy-Tree "$Root\vendor\platform-tools" "$Stage\vendor\platform-tools"
+# go-ios: only the program + its tunnel driver (selfIdentity.plist is this machine's pairing identity).
+New-Item -ItemType Directory -Force "$Stage\vendor\go-ios", "$Stage\ios" | Out-Null
+Copy-Item "$Root\vendor\go-ios\ios.exe", "$Root\vendor\go-ios\wintun.dll" "$Stage\vendor\go-ios"
+Copy-Item "$Root\vendor\wda\WDA.ipa" "$Stage\ios\WDA.ipa"
+Copy-Item "$PSScriptRoot\HUONG-DAN-IPHONE.txt" "$Stage\HUONG-DAN-IPHONE.txt"
 Copy-Tree "$Wy\wyoming_vietnamese" "$Stage\vendor\wyoming-vietnamese\wyoming_vietnamese" @('__pycache__')
 Copy-Item "$Wy\LICENSE" "$Stage\vendor\wyoming-vietnamese\LICENSE"
 Copy-Item "$PSScriptRoot\launch.py" "$Stage\launch.py"

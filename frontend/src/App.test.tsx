@@ -11,12 +11,12 @@ const settings: Settings = {
 
 afterEach(() => vi.restoreAllMocks());
 
-it("edits run settings from the action bar and saves WER as a ratio", async () => {
+it("edits run settings from the action bar and saves MER as a ratio", async () => {
   vi.spyOn(api, "profiles").mockResolvedValue([]);
   vi.spyOn(api, "device").mockResolvedValue({ adb: false, devices: [], error: null });
   vi.spyOn(api, "ttsDevice").mockRejectedValue(new Error("offline"));
   vi.spyOn(api, "sets").mockResolvedValue([]);
-  vi.spyOn(api, "currentJob").mockResolvedValue(null);
+  vi.spyOn(api, "jobs").mockResolvedValue([]);
   vi.spyOn(api, "health").mockResolvedValue({ wyoming: false, wyoming_error: null, gpu: false, job: null });
   vi.spyOn(api, "settings").mockResolvedValue(settings);
   vi.spyOn(api, "voices").mockResolvedValue([{ id: "voice-2", label: "Giọng thử — Nữ · Bắc · Tự nhiên" }]);
@@ -26,7 +26,7 @@ it("edits run settings from the action bar and saves WER as a ratio", async () =
   const bar = screen.getAllByRole("button", { name: "Nạp file" })[0].closest(".runbar") as HTMLElement;
   const controls = within(bar);
   // The bar shows the settings in effect; editing happens in one panel behind that summary.
-  const trigger = await controls.findByRole("button", { name: /voice-1 \/ voice-t \/ voice-n · WER ≤ 0% · 30s/ });
+  const trigger = await controls.findByRole("button", { name: /voice-1 \/ voice-t \/ voice-n · MER ≤ 0% · 30s/ });
   expect(controls.queryByRole("combobox", { name: "Miền Bắc" })).toBeNull();
   expect(screen.queryByRole("button", { name: /^Cài đặt$/ })).toBeNull();
   fireEvent.click(trigger);
@@ -40,13 +40,13 @@ it("edits run settings from the action bar and saves WER as a ratio", async () =
   expect(trigger.textContent).toContain("voice-2");
   expect(trigger.textContent).toContain("chưa lưu");
 
-  const info = panel.getByRole("button", { name: "Cách chấm WER và CER" });
+  const info = panel.getByRole("button", { name: "Cách chấm MER và CER" });
   fireEvent.click(info);
-  expect(panel.getByRole("dialog", { name: "Cách chấm WER và CER" }).textContent).toContain("chỉ để tham khảo");
+  expect(panel.getByRole("dialog", { name: "Cách chấm MER và CER" }).textContent).toContain("chỉ để tham khảo");
   fireEvent.click(info);
-  expect(panel.queryByRole("dialog", { name: "Cách chấm WER và CER" })).toBeNull();
+  expect(panel.queryByRole("dialog", { name: "Cách chấm MER và CER" })).toBeNull();
 
-  const wer = panel.getByRole("spinbutton", { name: /Ngưỡng WER/ });
+  const wer = panel.getByRole("spinbutton", { name: /Ngưỡng MER/ });
   expect((wer as HTMLInputElement).value).toBe("0");
   expect(panel.getByText("0% là khớp hoàn toàn")).toBeTruthy();
   fireEvent.change(wer, { target: { value: "25" } });
@@ -68,7 +68,7 @@ it("edits run settings from the action bar and saves WER as a ratio", async () =
   expect(trigger.textContent).toContain("1.2x");
   // Saved: the panel closes and the summary shows the new values.
   await waitFor(() => expect(controls.queryByRole("dialog", { name: "Cài đặt chạy" })).toBeNull());
-  expect(trigger.textContent).toContain("WER ≤ 25% · 45s");
+  expect(trigger.textContent).toContain("MER ≤ 25% · 45s");
   expect(trigger.textContent).not.toContain("chưa lưu");
 });
 
@@ -79,7 +79,7 @@ it("asks before saving settings whether to wipe the progress of existing sets", 
   vi.spyOn(api, "device").mockResolvedValue({ adb: false, devices: [], error: null });
   vi.spyOn(api, "ttsDevice").mockRejectedValue(new Error("offline"));
   const sets = vi.spyOn(api, "sets").mockResolvedValue([mk(2, "Bộ B"), mk(1, "Bộ A")]);
-  vi.spyOn(api, "currentJob").mockResolvedValue(null);
+  vi.spyOn(api, "jobs").mockResolvedValue([]);
   vi.spyOn(api, "health").mockResolvedValue({ wyoming: true, wyoming_error: null, gpu: true, job: null });
   vi.spyOn(api, "settings").mockResolvedValue(settings);
   vi.spyOn(api, "voices").mockResolvedValue([]);
@@ -91,11 +91,11 @@ it("asks before saving settings whether to wipe the progress of existing sets", 
 
   render(<App />);
   const bar = (await screen.findAllByRole("button", { name: "Nạp file" }))[0].closest(".runbar") as HTMLElement;
-  const trigger = await within(bar).findByRole("button", { name: /WER ≤ 0%/ });
+  const trigger = await within(bar).findByRole("button", { name: /MER ≤ 0%/ });
   await screen.findByRole("button", { name: "Xóa bộ Bộ B" });
   fireEvent.click(trigger);
   const panel = within(within(bar).getByRole("dialog", { name: "Cài đặt chạy" }));
-  const wer = panel.getByRole("spinbutton", { name: /Ngưỡng WER/ });
+  const wer = panel.getByRole("spinbutton", { name: /Ngưỡng MER/ });
 
   // Cancel: nothing is saved or deleted.
   fireEvent.change(wer, { target: { value: "5" } });
@@ -124,7 +124,7 @@ it("deletes the open audio set and opens the next one", async () => {
   vi.spyOn(api, "device").mockResolvedValue({ adb: false, devices: [], error: null });
   vi.spyOn(api, "ttsDevice").mockRejectedValue(new Error("offline"));
   const sets = vi.spyOn(api, "sets").mockResolvedValue([mk(2, "Bộ B"), mk(1, "Bộ A")]);
-  vi.spyOn(api, "currentJob").mockResolvedValue(null);
+  vi.spyOn(api, "jobs").mockResolvedValue([]);
   vi.spyOn(api, "health").mockResolvedValue({ wyoming: true, wyoming_error: null, gpu: true, job: null });
   vi.spyOn(api, "settings").mockResolvedValue(settings);
   vi.spyOn(api, "appRuns").mockResolvedValue([]);
@@ -149,7 +149,7 @@ it("clears all data and leaves no set open", async () => {
   vi.spyOn(api, "device").mockResolvedValue({ adb: false, devices: [], error: null });
   vi.spyOn(api, "ttsDevice").mockRejectedValue(new Error("offline"));
   const sets = vi.spyOn(api, "sets").mockResolvedValue([mk(2, "Bộ B"), mk(1, "Bộ A")]);
-  vi.spyOn(api, "currentJob").mockResolvedValue(null);
+  vi.spyOn(api, "jobs").mockResolvedValue([]);
   vi.spyOn(api, "health").mockResolvedValue({ wyoming: true, wyoming_error: null, gpu: true, job: null });
   vi.spyOn(api, "settings").mockResolvedValue(settings);
   vi.spyOn(api, "appRuns").mockResolvedValue([]);
@@ -174,7 +174,7 @@ it("opens the imported audio set and warns about sentences without audio", async
   vi.spyOn(api, "profiles").mockResolvedValue([]);
   vi.spyOn(api, "device").mockResolvedValue({ adb: false, devices: [], error: null });
   const sets = vi.spyOn(api, "sets").mockResolvedValue([mk(2, "Bộ B")]);
-  vi.spyOn(api, "currentJob").mockResolvedValue(null);
+  vi.spyOn(api, "jobs").mockResolvedValue([]);
   vi.spyOn(api, "health").mockResolvedValue({ wyoming: true, wyoming_error: null, gpu: true, job: null });
   vi.spyOn(api, "settings").mockResolvedValue(settings);
   vi.spyOn(api, "appRuns").mockResolvedValue([]);
@@ -199,7 +199,7 @@ it("exports a set from the sidebar", async () => {
   vi.spyOn(api, "profiles").mockResolvedValue([]);
   vi.spyOn(api, "device").mockResolvedValue({ adb: false, devices: [], error: null });
   vi.spyOn(api, "sets").mockResolvedValue([mk(2, "Bộ B")]);
-  vi.spyOn(api, "currentJob").mockResolvedValue(null);
+  vi.spyOn(api, "jobs").mockResolvedValue([]);
   vi.spyOn(api, "health").mockResolvedValue({ wyoming: true, wyoming_error: null, gpu: true, job: null });
   vi.spyOn(api, "settings").mockResolvedValue(settings);
   vi.spyOn(api, "appRuns").mockResolvedValue([]);

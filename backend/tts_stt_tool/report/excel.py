@@ -26,11 +26,11 @@ SHEET_OP_ERRORS = "Lỗi thao tác"
 
 DETAIL_HEADERS = [
     "Sheet", "TC_ID", "Lượt", "Cụm tính năng", "Ưu tiên", "Câu gốc", "Câu đọc",
-    "Text STT tham chiếu", "WER", "CER", "Từ sai", "Số lần sinh", "Trạng thái",
+    "Text STT tham chiếu", "MER", "CER", "Từ sai", "Số lần sinh", "Trạng thái",
 ]
 APP_HEADERS = [
     "Sheet", "TC_ID", "Lượt", "Cụm tính năng", "Ưu tiên", "Câu gốc", "Câu đọc",
-    "Text app", "WER", "CER", "Từ sai", "Kết quả",
+    "Text app", "MER", "CER", "Từ sai", "Kết quả",
 ]
 OP_ERROR_HEADERS = ["Sheet", "TC_ID", "Lượt", "Câu đọc", "Lỗi", "Nhật ký thao tác"]
 SKIPPED_HEADERS = ["Sheet", "TC_ID", "Lượt", "Người nói", "Câu gốc", "Lý do"]
@@ -108,7 +108,7 @@ def _overview(ws: Any, store: Store, audio_set_id: int, settings: Settings, item
     pairs += [(st.value, summary.get(st.value, 0), None) for st in ItemStatus]
     avg = lambda key: sum(i[key] or 0 for i in verified) / len(verified) if verified else 0  # noqa: E731
     pairs += [
-        ("WER trung bình", avg("wer"), PCT),
+        ("MER trung bình", avg("wer"), PCT),
         ("CER trung bình", avg("cer"), PCT),
         ("Tỉ lệ audio bị loại", ratio, PCT),
     ]
@@ -175,7 +175,7 @@ def _app_overview(ws: Any, store: Store, run_id: int, results: list[dict]) -> No
     ]
     pairs += [(st.value, summary.get(st.value, 0), None) for st in AppStatus]
     pairs += [("Tỉ lệ đúng của app", app_correct_ratio(summary), PCT),
-              ("WER app trung bình", avg("wer"), PCT), ("CER app trung bình", avg("cer"), PCT)]
+              ("MER app trung bình", avg("wer"), PCT), ("CER app trung bình", avg("cer"), PCT)]
     for label, value, fmt in pairs:
         row += 1
         ws.cell(row=row, column=1, value=label).font = BOLD
@@ -217,9 +217,9 @@ def build_block1_report(
     wb.active.title = SHEET_OVERVIEW
 
     active = [i for i in items if i["status"] != ItemStatus.SKIPPED.value]
-    _table(wb.create_sheet(SHEET_VERIFY), DETAIL_HEADERS, [_detail_row(i) for i in active], ("WER", "CER"))
+    _table(wb.create_sheet(SHEET_VERIFY), DETAIL_HEADERS, [_detail_row(i) for i in active], ("MER", "CER"))
     failed = [i for i in items if i["status"] == ItemStatus.AUDIO_FAILED.value]
-    _table(wb.create_sheet(SHEET_FAILED), DETAIL_HEADERS, [_detail_row(i) for i in failed], ("WER", "CER"))
+    _table(wb.create_sheet(SHEET_FAILED), DETAIL_HEADERS, [_detail_row(i) for i in failed], ("MER", "CER"))
     skipped = [i for i in items if i["status"] == ItemStatus.SKIPPED.value]
     _table(wb.create_sheet(SHEET_SKIPPED), SKIPPED_HEADERS,
            [[i["sheet"], i["tc_id"], i["turn"], i["speaker"], i["text_raw"], i["skip_reason"]] for i in skipped])
@@ -230,7 +230,7 @@ def build_block1_report(
         results = store.app_results(app_run_id)
         _app_overview(wb[SHEET_OVERVIEW], store, app_run_id, results)
         tested = [r for r in results if r["status"] != AppStatus.OP_ERROR.value]
-        _table(wb.create_sheet(SHEET_APP), APP_HEADERS, [_app_row(r) for r in tested], ("WER", "CER"))
+        _table(wb.create_sheet(SHEET_APP), APP_HEADERS, [_app_row(r) for r in tested], ("MER", "CER"))
         ops = [r for r in results if r["status"] == AppStatus.OP_ERROR.value]
         _table(wb.create_sheet(SHEET_OP_ERRORS), OP_ERROR_HEADERS,
                [[r["sheet"], r["tc_id"], r["turn"], r["text_tts"], r["error"], r["log"]] for r in ops])

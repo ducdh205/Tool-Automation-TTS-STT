@@ -118,6 +118,35 @@ def test_manual_input_and_pin_blocked_while_job_uses_the_phone(ctx):
     assert c.get("/api/device").json()["busy"] is None
 
 
+def test_block1_runs_beside_block2(ctx):
+    """Generate/verify never wait for an app test; only "Sinh lại" on the tested set does."""
+    import time
+
+    c, app, fake, tmp_path = ctx
+    fake.transcript = None  # nothing heard -> the job polls until result_timeout_s
+    name = fast_profile(c)
+    p = next(x for x in c.get("/api/profiles").json() if x["name"] == name) | {"result_timeout_s": 3}
+    c.put(f"/api/profiles/{name}", json=p)
+    set_a = verified_set(c, tmp_path)
+    set_b = create_set(c, tmp_path)
+    assert c.post(f"/api/audio-sets/{set_a}/app-runs", json={"serial": "SER", "profile": name}).status_code == 200
+    time.sleep(0.2)
+
+    r = c.post(f"/api/audio-sets/{set_a}/regenerate", json={"item_ids": None})
+    assert r.status_code == 409 and "cùng bộ audio" in r.json()["detail"]
+    assert c.post(f"/api/audio-sets/{set_a}/verify").status_code == 422  # free; nothing left to verify
+    assert c.post(f"/api/audio-sets/{set_b}/app-runs", json={"serial": "SER", "profile": name}).status_code == 409
+
+    assert c.post(f"/api/audio-sets/{set_b}/generate").status_code == 200
+    lanes = {j["lane"]: j["set_id"] for j in c.get("/api/jobs").json()}
+    assert lanes.get("block2") == set_a
+    assert c.get("/api/health").json()["jobs"]
+    for j in c.get("/api/jobs").json():
+        c.post(f"/api/jobs/{j['id']}/cancel")
+    wait_job_end(c, timeout=30)
+    assert c.get("/api/jobs").json() == []
+
+
 def test_app_run_on_selected_items_saves_shots(ctx):
     c, app, fake, tmp_path = ctx
     name = fast_profile(c)

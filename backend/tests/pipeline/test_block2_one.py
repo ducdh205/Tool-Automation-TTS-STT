@@ -41,6 +41,19 @@ async def test_nothing_heard_returns_none_not_error():
     assert app.state == "home"
 
 
+async def test_not_heard_notice_is_flagged_without_waiting_for_timeout():
+    app = FakeApp(transcript=None, not_heard_notice=True)
+    cap = await one(app)
+    assert cap.text is None and cap.not_heard
+    assert any("Chưa nghe rõ" in line for line in cap.log)
+    assert app.state == "home"
+
+
+async def test_nothing_heard_without_notice_is_not_flagged():
+    cap = await one(FakeApp(transcript=None))
+    assert not cap.not_heard
+
+
 async def test_starts_from_open_sheet():
     """Review #4."""
     app = FakeApp(state="idle")

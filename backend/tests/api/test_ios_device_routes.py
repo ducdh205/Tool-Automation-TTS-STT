@@ -86,3 +86,15 @@ def test_wda_down_is_reported_per_device(tmp_path):
         (d,) = c.get("/api/device").json()["devices"]
         assert d["state"] == "no_wda"
         assert c.get(f"/api/device/{UDID}/screen").status_code == 503
+
+
+def test_connect_button_with_wda_already_up(ios_client):
+    c, _ = ios_client
+    assert c.get("/api/ios/connect").json()["state"] == "idle"
+    c.post("/api/ios/connect")
+    for _ in range(50):
+        s = c.get("/api/ios/connect").json()
+        if s["state"] != "starting":
+            break
+    assert s["state"] == "running" and s["external"] is True
+    assert c.post("/api/ios/disconnect").json()["state"] == "idle"

@@ -7,8 +7,10 @@ Folder layout (built by packaging/build.ps1), next to this file:
     backend/tts_stt_tool/      the tool's source
     frontend/dist/             built web UI
     vendor/platform-tools/     adb
+    vendor/go-ios/             go-ios (iPhone list, port forward)
+    ios/WDA.ipa                WebDriverAgent to sideload on each iPhone (see HUONG-DAN-IPHONE.txt)
     vendor/wyoming-vietnamese/ wyoming source (STT)
-    runtime/py312/             Python 3.12 + the tool's libraries (runs this file)
+    runtime/py312/             Python 3.12 + the tool's libraries incl. pymobiledevice3 (runs this file)
     runtime/py314/             Python 3.14.8 + wyoming's libraries
     models/hf/                 VieNeu models (Hugging Face cache)
     models/wyoming/            wyoming models

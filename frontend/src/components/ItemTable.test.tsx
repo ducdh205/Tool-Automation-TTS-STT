@@ -111,7 +111,7 @@ describe("audio playback (review #8)", () => {
 });
 
 describe("app mode (block 2)", () => {
-  it("shows the app's text, WER and verdict instead of the reference STT", () => {
+  it("shows the app's text, MER and verdict instead of the reference STT", () => {
     const item = makeItem(0, { status: "Đạt", ref_text: "mua sữa", wer: 0, cer: 0 });
     const app = new Map([[1, {
       id: 50, app_run_id: 7, item_id: 1, status: "Sai" as const, app_text: "mua sửa", wer: 0.5, cer: 0.1,
@@ -157,7 +157,7 @@ describe("compact columns", () => {
     expect(container.querySelector(".row.head")?.children.length).toBe(8);
   });
 
-  it("shows WER with the CER beside it", () => {
+  it("shows MER with the CER beside it", () => {
     const item = makeItem(0, { status: "Audio không đạt", ref_text: "bật quát", wer: 0.5, cer: 0.125 });
     render(<ItemTable items={[item]} onPatch={() => {}} />);
     expect(screen.getByText("50%")).toBeTruthy();

@@ -17,10 +17,10 @@ function panel(over: Partial<Parameters<typeof AppRunPanel>[0]> = {}) {
 }
 
 describe("AppRunPanel", () => {
-  it("regrades the shown run with a new WER threshold", () => {
+  it("regrades the shown run with a new MER threshold", () => {
     const onSetThreshold = vi.fn().mockResolvedValue(undefined);
     render(<AppRunPanel {...panel({ runs: [run], runId: 7, onSetThreshold })} />);
-    const box = screen.getByRole("spinbutton", { name: "Ngưỡng WER để chấm Đúng (%)" }) as HTMLInputElement;
+    const box = screen.getByRole("spinbutton", { name: "Ngưỡng MER để chấm Đúng (%)" }) as HTMLInputElement;
     expect(box.value).toBe("0");
     fireEvent.change(box, { target: { value: "20" } });
     fireEvent.blur(box);

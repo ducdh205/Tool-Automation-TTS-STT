@@ -26,7 +26,7 @@ from tts_stt_tool.device.ui_tree import UiNode, node_at, parse_dump
 from tts_stt_tool.input.filters import clean_text, has_words
 from tts_stt_tool.input.generic import ColumnMapping, preview_sheet, read_items, sheet_names
 from tts_stt_tool.input.testcase_form import InputError
-from tts_stt_tool.jobs.runner import JobBusyError
+from tts_stt_tool.jobs.runner import JobBusyError, Lane
 from tts_stt_tool.pipeline.block1 import run_generate, run_verify
 from tts_stt_tool.pipeline.block2 import run_block2
 from tts_stt_tool.report.audio_set_zip import PackError, build_audio_set_zip, import_audio_set_zip, pack_name
@@ -163,8 +163,12 @@ def list_audio_sets(request: Request) -> list[dict[str, Any]]:
     return [{**s, "summary": ctx.store.summary(s["id"])} for s in ctx.store.list_audio_sets()]
 
 
-def _require_no_job(ctx: AppContext, what: str) -> None:
-    job = ctx.runner.current()
+def _require_no_job(ctx: AppContext, what: str, set_id: int | None = None) -> None:
+    """409 while a job runs — any job, or with ``set_id`` only one on that set."""
+    if set_id is None:
+        job = ctx.runner.busy()
+    else:
+        job = next((j for j in ctx.runner.jobs() if j["set_id"] == set_id), None)
     if job is not None:  # a running job may be writing rows or WAVs
         raise HTTPException(409, f"Đang chạy: {job['name']} — dừng job trước khi {what}")
 
@@ -191,7 +195,7 @@ async def export_audio_set(request: Request, set_id: int) -> dict[str, str]:
     """Build the set's zip (manifest + WAVs), then hand out a one-time GET link like the session zip."""
     ctx = ctx_of(request)
     audio_set = _require_set(ctx, set_id)
-    _require_no_job(ctx, "xuất bộ audio")
+    _require_no_job(ctx, "xuất bộ audio", set_id)
     _sweep_exports(ctx)
     ctx.exports_dir.mkdir(parents=True, exist_ok=True)
     token = uuid.uuid4().hex
@@ -210,9 +214,8 @@ async def delete_audio_set(request: Request, set_id: int) -> dict[str, bool]:
     """Delete a set, its app runs and results, their screenshots, and WAVs no other set uses."""
     ctx = ctx_of(request)
     _require_set(ctx, set_id)
-    job = ctx.runner.current()
-    if job is not None:  # a running job may be writing rows or files of this set
-        raise HTTPException(409, f"Đang chạy: {job['name']} — dừng job trước khi xóa")
+    # Every job, not only this set's: sets share cached WAVs, and a job elsewhere may be about to reuse one.
+    _require_no_job(ctx, "xóa")
     gone = ctx.store.delete_audio_set(set_id)
     if gone is None:
         raise HTTPException(404, "Không tìm thấy bộ audio")
@@ -248,9 +251,7 @@ async def clear_all_data(request: Request) -> dict[str, Any]:
     Settings, app profiles, wyoming models and voice previews are kept.
     """
     ctx = ctx_of(request)
-    job = ctx.runner.current()
-    if job is not None:  # a running job may be writing rows or files
-        raise HTTPException(409, f"Đang chạy: {job['name']} — dừng job trước khi xóa")
+    _require_no_job(ctx, "xóa")  # a running job may be writing rows or files
     count = ctx.store.delete_all_audio_sets()
     ctx.exports.clear()
 
@@ -264,11 +265,9 @@ async def clear_all_data(request: Request) -> dict[str, Any]:
 
 @router.delete("/progress")
 async def reset_progress(request: Request) -> dict[str, Any]:
-    """Clear generated audio, STT/WER results and app runs of every set; imported rows are kept as "Chờ"."""
+    """Clear generated audio, STT/MER results and app runs of every set; imported rows are kept as "Chờ"."""
     ctx = ctx_of(request)
-    job = ctx.runner.current()
-    if job is not None:  # a running job may be writing rows or files
-        raise HTTPException(409, f"Đang chạy: {job['name']} — dừng job trước khi xóa")
+    _require_no_job(ctx, "xóa")  # a running job may be writing rows or files
     count = ctx.store.reset_progress()
     ctx.exports.clear()
 
@@ -335,9 +334,18 @@ class ItemIdsIn(BaseModel):
     item_ids: list[int] | None = None  # None = every eligible row
 
 
-def _start(ctx: AppContext, name: str, job) -> dict[str, str]:
+def _require_lane_free(ctx: AppContext, lane: Lane, set_id: int, exclusive: bool = False) -> None:
+    """409 before any other check: the lane is taken, or a clashing job of the other lane is on this set."""
     try:
-        return {"job_id": ctx.runner.start(name, job)}
+        ctx.runner.check(lane, set_id, exclusive)
+    except JobBusyError as e:
+        raise HTTPException(409, str(e)) from e
+
+
+def _start(ctx: AppContext, name: str, job, set_id: int, exclusive: bool = False) -> dict[str, str]:
+    """Start a Block 1 job beside a Block 2 job; ``exclusive`` (Sinh lại) waits for Block 2 on this set."""
+    try:
+        return {"job_id": ctx.runner.start(name, job, lane="block1", set_id=set_id, exclusive=exclusive)}
     except JobBusyError as e:
         raise HTTPException(409, str(e)) from e
 
@@ -347,6 +355,7 @@ def _start(ctx: AppContext, name: str, job) -> dict[str, str]:
 async def start_generate(request: Request, set_id: int, body: ItemIdsIn | None = None) -> dict[str, str]:
     ctx = ctx_of(request)
     _require_set(ctx, set_id)
+    _require_lane_free(ctx, "block1", set_id)
     ids = body.item_ids if body else None
     if not ctx.store.items_for_generate(set_id, ids):
         raise HTTPException(422, "Không có câu nào cần sinh audio")
@@ -354,13 +363,14 @@ async def start_generate(request: Request, set_id: int, body: ItemIdsIn | None =
     async def job(emit, cancel) -> None:
         await run_generate(ctx.store, set_id, ctx.tts, ctx.cache, ctx.settings, emit, cancel, item_ids=ids)
 
-    return _start(ctx, f"Sinh audio – bộ {set_id}", job)
+    return _start(ctx, f"Sinh audio – bộ {set_id}", job, set_id)
 
 
 @router.post("/audio-sets/{set_id}/regenerate")
 async def start_regenerate(request: Request, set_id: int, body: ItemIdsIn | None = None) -> dict[str, str]:
     ctx = ctx_of(request)
     _require_set(ctx, set_id)
+    _require_lane_free(ctx, "block1", set_id, exclusive=True)  # swaps WAVs a Block 2 run may be playing
     ids = body.item_ids if body else None
     if not ctx.store.items_for_regenerate(set_id, ids):
         raise HTTPException(422, "Không có câu nào để sinh lại")
@@ -369,13 +379,14 @@ async def start_regenerate(request: Request, set_id: int, body: ItemIdsIn | None
         await run_generate(ctx.store, set_id, ctx.tts, ctx.cache, ctx.settings, emit, cancel,
                            item_ids=ids, regenerate=True)
 
-    return _start(ctx, f"Sinh lại – bộ {set_id}", job)
+    return _start(ctx, f"Sinh lại – bộ {set_id}", job, set_id, exclusive=True)
 
 
 @router.post("/audio-sets/{set_id}/verify")
 async def start_verify(request: Request, set_id: int, body: ItemIdsIn | None = None) -> dict[str, str]:
     ctx = ctx_of(request)
     _require_set(ctx, set_id)
+    _require_lane_free(ctx, "block1", set_id)
     ids = body.item_ids if body else None
     if not ctx.store.items_for_verify(set_id, ids):
         raise HTTPException(422, "Không có câu nào có audio để verify")
@@ -385,7 +396,7 @@ async def start_verify(request: Request, set_id: int, body: ItemIdsIn | None = N
             await ctx.wyoming.ensure_running()
         await run_verify(ctx.store, set_id, ctx.stt, ctx.settings, emit, cancel, item_ids=ids)
 
-    return _start(ctx, f"Verify – bộ {set_id}", job)
+    return _start(ctx, f"Verify – bộ {set_id}", job, set_id)
 
 
 @router.post("/jobs/{job_id}/cancel")
@@ -397,7 +408,13 @@ def cancel_job(request: Request, job_id: str) -> dict[str, bool]:
 
 @router.get("/jobs/current")
 def current_job(request: Request) -> dict[str, Any] | None:
-    return ctx_of(request).runner.current()
+    """The oldest running job (kept for old clients; /jobs lists them all)."""
+    return ctx_of(request).runner.busy()
+
+
+@router.get("/jobs")
+def list_jobs(request: Request) -> list[dict[str, Any]]:
+    return ctx_of(request).runner.jobs()
 
 
 # -- reports ------------------------------------------------------------------
@@ -524,7 +541,7 @@ class TtsDeviceIn(BaseModel):
 @router.put("/tts/device")
 async def put_tts_device(request: Request, body: TtsDeviceIn) -> dict[str, Any]:
     ctx = ctx_of(request)
-    if ctx.runner.current() is not None:  # the model is reloaded on switch; never under a running job
+    if ctx.runner.busy() is not None:  # the model is reloaded on switch; never under a running job
         raise HTTPException(409, "Đang có tác vụ chạy, đợi xong rồi đổi")
     if body.device == "cuda":
         probe = await ctx.gpu.probe(refresh=True)  # CUDA may have been installed by hand meanwhile
@@ -544,7 +561,7 @@ async def install_cuda(request: Request) -> dict[str, Any]:
         raise HTTPException(400, "Máy không có GPU NVIDIA")
 
     def on_done() -> None:
-        if ctx.runner.current() is None:  # else the user switches once the job ends
+        if ctx.runner.busy() is None:  # else the user switches once the job ends
             _apply_tts_device(ctx, "cuda")
 
     ctx.gpu.start_install(on_done)
@@ -578,6 +595,32 @@ async def device_status(request: Request) -> dict[str, Any]:
         errors.append("Không tìm thấy adb")
     return {"adb": adb.available, "ios": ctx.ios.available, "error": "; ".join(errors) or None,
             "devices": devices, "busy": ctx.busy_serial}
+
+
+def _launcher(ctx: AppContext):
+    if ctx.wda_launcher is None:
+        raise HTTPException(503, "Không tìm thấy go-ios (vendor/go-ios/ios.exe)")
+    return ctx.wda_launcher
+
+
+@router.get("/ios/connect")
+async def ios_connect_status(request: Request) -> dict[str, Any]:
+    """State of the "Kết nối iPhone" button: idle | starting | running | error (+ step, error, detail)."""
+    return _launcher(ctx_of(request)).snapshot()
+
+
+@router.post("/ios/connect")
+async def ios_connect(request: Request) -> dict[str, Any]:
+    """Start WebDriverAgent on the USB iPhone and forward its port, in the background."""
+    return _launcher(ctx_of(request)).start()
+
+
+@router.post("/ios/disconnect")
+async def ios_disconnect(request: Request) -> dict[str, Any]:
+    ctx = ctx_of(request)
+    if ctx.busy_serial and await ctx.ios.is_ios(ctx.busy_serial):
+        raise HTTPException(409, "Đang chạy test app trên iPhone — dừng job trước")
+    return _launcher(ctx).stop()
 
 
 @router.get("/device/{serial}/screen")
@@ -688,6 +731,7 @@ class ProfileIn(BaseModel):
     sheet_label: str = ""
     discard_label: str = ""
     heard_prefix: str = ""
+    not_heard_label: str = "Chưa nghe rõ"
     pre_delay_s: float = Field(ge=0, le=10)
     post_delay_s: float = Field(ge=0, le=10)
     listen_timeout_s: float = Field(gt=0, le=60)
@@ -713,7 +757,8 @@ class AppRunIn(BaseModel):
     item_ids: list[int] | None = None  # None = every row that passed Block 1
 
 
-def _start_block2(ctx: AppContext, run_id: int, serial: str, profile: AppProfile) -> str:
+def _start_block2(ctx: AppContext, run_id: int, set_id: int, serial: str, profile: AppProfile) -> str:
+    """Start a Block 2 job beside a Block 1 job (not beside "Sinh lại" on this set)."""
     async def job(emit, cancel) -> None:
         ctx.busy_serial = serial
         try:
@@ -724,7 +769,7 @@ def _start_block2(ctx: AppContext, run_id: int, serial: str, profile: AppProfile
             ctx.busy_serial = None
 
     try:
-        return ctx.runner.start(f"Khối 2 – lần test {run_id}", job)
+        return ctx.runner.start(f"Khối 2 – lần test {run_id}", job, lane="block2", set_id=set_id)
     except JobBusyError as e:
         raise HTTPException(409, str(e)) from e
 
@@ -741,8 +786,7 @@ async def create_app_run(request: Request, set_id: int, body: AppRunIn) -> dict[
     ctx = ctx_of(request)
     _require_set(ctx, set_id)
     profile = _profile(ctx, body.profile)
-    if ctx.runner.current() is not None:
-        raise HTTPException(409, f"Đang chạy: {ctx.runner.current()['name']}")
+    _require_lane_free(ctx, "block2", set_id)
     if not ctx.store.count_with_audio(set_id):
         raise HTTPException(422, "Bộ audio chưa có câu nào có audio — sinh audio ở Khối 1 trước")
     model, version = await _device_model_version(ctx, body.serial, profile.package)
@@ -751,7 +795,7 @@ async def create_app_run(request: Request, set_id: int, body: AppRunIn) -> dict[
     if not ctx.store.app_results(run_id):
         ctx.store.delete_app_run(run_id)
         raise HTTPException(422, "Không có câu nào có audio trong các case đã chọn")
-    return {"id": run_id, "job_id": _start_block2(ctx, run_id, body.serial, profile)}
+    return {"id": run_id, "job_id": _start_block2(ctx, run_id, set_id, body.serial, profile)}
 
 
 def _require_run(ctx: AppContext, run_id: int) -> dict[str, Any]:
@@ -767,7 +811,7 @@ class ThresholdIn(BaseModel):
 
 @router.put("/app-runs/{run_id}/threshold")
 def set_run_threshold(request: Request, run_id: int, body: ThresholdIn) -> dict[str, Any]:
-    """Grade this run again with another WER threshold; the next new run starts with it too."""
+    """Grade this run again with another MER threshold; the next new run starts with it too."""
     ctx = ctx_of(request)
     _require_run(ctx, run_id)
     ctx.store.set_app_threshold(run_id, body.wer_threshold)
@@ -781,7 +825,7 @@ def set_run_threshold(request: Request, run_id: int, body: ThresholdIn) -> dict[
 async def resume_app_run(request: Request, run_id: int) -> dict[str, str]:
     ctx = ctx_of(request)
     run = _require_run(ctx, run_id)
-    return {"job_id": _start_block2(ctx, run_id, run["serial"], _profile(ctx, run["profile_name"]))}
+    return {"job_id": _start_block2(ctx, run_id, run["audio_set_id"], run["serial"], _profile(ctx, run["profile_name"]))}
 
 
 class RerunIn(BaseModel):
@@ -795,8 +839,7 @@ async def rerun_app_run(request: Request, run_id: int, body: RerunIn) -> dict[st
     ctx = ctx_of(request)
     run = _require_run(ctx, run_id)
     profile = _profile(ctx, run["profile_name"])
-    if ctx.runner.current() is not None:
-        raise HTTPException(409, f"Đang chạy: {ctx.runner.current()['name']}")
+    _require_lane_free(ctx, "block2", run["audio_set_id"])
     if body.serial != run["serial"]:
         raise HTTPException(409, f"Lần test #{run_id} chạy trên máy {run['device_model'] or run['serial']}"
                                  " — chọn máy đó, hoặc tạo lần test mới")
@@ -807,7 +850,7 @@ async def rerun_app_run(request: Request, run_id: int, body: RerunIn) -> dict[st
                                      f" so với lần test #{run_id} — tạo lần test mới")
     if not ctx.store.rerun_app_results(run_id, body.item_ids):
         raise HTTPException(422, "Không có câu nào có audio trong các case đã chọn")
-    return {"job_id": _start_block2(ctx, run_id, run["serial"], profile)}
+    return {"job_id": _start_block2(ctx, run_id, run["audio_set_id"], run["serial"], profile)}
 
 
 def _run_file_base(ctx: AppContext, run: dict[str, Any]) -> str:
@@ -906,4 +949,4 @@ async def health(request: Request) -> dict[str, Any]:
 
         up = await port_open(ctx.settings.wyoming_host, ctx.settings.wyoming_port, 0.5)
     return {"wyoming": up, "wyoming_error": ctx.wyoming_error, "gpu": (await ctx.gpu.probe()).torch_cuda,
-            "job": ctx.runner.current()}
+            "job": ctx.runner.busy(), "jobs": ctx.runner.jobs()}

@@ -237,6 +237,7 @@ nav { display: flex; flex-direction: column; gap: 2px; }
 .search:focus-within { border-color: var(--accent); }
 .search input { border: 0; outline: 0; background: none; padding: 5px 0; flex: 1; min-width: 0; color: var(--text); }
 .progress-line { display: flex; align-items: center; gap: 10px; }
+.progress-line .job-name { flex: 0 1 auto; max-width: 220px; color: var(--muted, inherit); }
 .progress { flex: 1; height: 6px; background: var(--panel-2); border-radius: 3px; overflow: hidden; border: 1px solid var(--border); }
 .progress .bar { height: 100%; background: var(--accent); transition: width .3s; }
 
@@ -288,6 +289,10 @@ nav { display: flex; flex-direction: column; gap: 2px; }
 .phone { align-self: center; width: 250px; aspect-ratio: 9 / 19.5; border: 10px solid var(--phone-frame); border-radius: 34px; background: var(--phone-bg); overflow: hidden; box-shadow: 0 8px 24px rgba(0,0,0,.18); }
 .phone-screen { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: var(--panel-2); }
 .phone-empty { display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; padding: 16px; }
+.ios-connect .btn { margin-top: 4px; }
+.ios-connect .error { max-width: 260px; }
+.ios-connect details { max-width: 260px; text-align: left; }
+.ios-connect-detail { white-space: pre-wrap; word-break: break-word; font-size: 11px; max-height: 140px; overflow: auto; margin: 4px 0 0; }
 .phone-img { width: 100%; height: 100%; object-fit: contain; display: block; background: #000; }
 .dot-label.ok { color: var(--ok); }
 .dot-label.warn { color: var(--warn); }

@@ -39,7 +39,7 @@ describe("readiness", () => {
     expect(readiness(HEALTHY, { adb: false, ios: true, error: null, devices: [iphone] }))
       .toEqual({ ready: true, hint: null });
     expect(readiness(HEALTHY, { adb: false, ios: true, error: null, devices: [{ ...iphone, state: "no_wda" }] }))
-      .toEqual({ ready: false, hint: "Chạy WebDriverAgent trên iPhone và chuyển cổng 8100" });
+      .toEqual({ ready: false, hint: "Bấm \"Kết nối iPhone\" ở khung Thiết bị" });
   });
 });
 

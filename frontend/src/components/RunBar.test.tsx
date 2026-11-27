@@ -4,7 +4,7 @@ import { RunBar } from "./RunBar";
 
 function props(over: Partial<Parameters<typeof RunBar>[0]> = {}) {
   return {
-    mode: "step1" as const, hasSet: true, job: null, statuses: STATUSES, summary: { "Chờ": 3 }, total: 3,
+    mode: "step1" as const, hasSet: true, jobs: [], blocked: null, statuses: STATUSES, summary: { "Chờ": 3 }, total: 3,
     filter: "all", search: "", onFilter: vi.fn(), onSearch: () => {}, onImport: () => {}, onGenerate: vi.fn(),
     onVerify: vi.fn(), onRegenerate: vi.fn(), onStop: vi.fn(), onReport: vi.fn(), selectedCount: 0,
     onClearSelection: vi.fn(), ...over,
@@ -38,12 +38,24 @@ describe("RunBar", () => {
     const { rerender } = render(<RunBar {...props()} />);
     expect(screen.queryByRole("status")).toBeNull();
     expect(screen.queryByText("Dừng")).toBeNull();
-    const p = props({ job: { id: "j", name: "x", done: 1, total: 3 } });
+    const p = props({ jobs: [{ id: "j", name: "Sinh audio – bộ 1", done: 1, total: 3, lane: "block1", set_id: 1 }],
+      blocked: "Đang chạy: Sinh audio – bộ 1" });
     rerender(<RunBar {...p} />);
-    expect((screen.getByText("Sinh audio (tất cả)") as HTMLButtonElement).disabled).toBe(true);
+    const gen = screen.getByText("Sinh audio (tất cả)") as HTMLButtonElement;
+    expect(gen.disabled).toBe(true);
+    expect(gen.title).toBe("Đang chạy: Sinh audio – bộ 1");
     expect(screen.getByRole("status").textContent).toContain("1/3");
     fireEvent.click(screen.getByText("Dừng"));
-    expect(p.onStop).toHaveBeenCalled();
+    expect(p.onStop).toHaveBeenCalledWith("j");
+  });
+
+  it("a job on another lane shows its progress but leaves the buttons free", () => {
+    const p = props({ jobs: [
+      { id: "a", name: "Khối 2 – lần test 4", done: 2, total: 9, lane: "block2", set_id: 7 },
+    ] });
+    render(<RunBar {...p} />);
+    expect((screen.getByText("Sinh audio (tất cả)") as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.getByRole("status", { name: "Khối 2 – lần test 4" }).textContent).toContain("2/9");
   });
 
   it("hides empty status chips but keeps the active one", () => {

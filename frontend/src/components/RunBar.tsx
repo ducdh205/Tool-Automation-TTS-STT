@@ -8,7 +8,12 @@ interface Props {
   /** Step 1 shows the Block 1 actions; step 2 shows `appActions` (from AppRunPanel) in the same slot. */
   mode: "step1" | "step2";
   hasSet: boolean;
-  job: Job | null;
+  /** Every running job: each gets its own progress line and Stop button. */
+  jobs: Job[];
+  /** Why this step's run buttons are off (a conflicting job runs), or null when they are free. */
+  blocked: string | null;
+  /** Like `blocked`, for "Sinh lại" (it also waits for an app test on this set); defaults to `blocked`. */
+  regenBlocked?: string | null;
   /** Count per status for the filter chips (Block 1 statuses in step 1, app verdicts in step 2). */
   statuses: readonly string[];
   summary: Record<string, number>;
@@ -21,7 +26,7 @@ interface Props {
   onGenerate: () => void;
   onVerify: () => void;
   onRegenerate: () => void;
-  onStop: () => void;
+  onStop: (jobId: string) => void;
   onReport: (format: "xlsx" | "csv") => void;
   settingsControls?: ReactNode;
   settingsSaving?: boolean;
@@ -31,11 +36,11 @@ interface Props {
 }
 
 export function RunBar(p: Props) {
-  const pct = p.job && p.job.total ? (p.job.done / p.job.total) * 100 : 0;
   const n = p.selectedCount;
   const scope = n ? String(n) : "tất cả";
-  const busy = !!p.job;
-  const actionDisabled = busy || p.settingsSaving;
+  const actionDisabled = !!p.blocked || p.settingsSaving;
+  const why = p.blocked ?? undefined;
+  const regenWhy = p.regenBlocked === undefined ? p.blocked : p.regenBlocked;
   // Empty statuses only add noise; the active one stays so the filter can be seen and cleared.
   const chips = p.statuses.filter((s) => (p.summary[s] ?? 0) > 0 || p.filter === s);
 
@@ -44,16 +49,16 @@ export function RunBar(p: Props) {
       <div className="toolbar">
         {p.mode === "step1" ? (
           <>
-            <button className="btn" onClick={p.onImport} disabled={actionDisabled}><Icon name="upload" />Nạp file</button>
+            <button className="btn" onClick={p.onImport} disabled={p.settingsSaving}><Icon name="upload" />Nạp file</button>
             <span className="divider" />
-            <button className="btn primary" onClick={p.onGenerate} disabled={!p.hasSet || actionDisabled}>
+            <button className="btn primary" onClick={p.onGenerate} disabled={!p.hasSet || actionDisabled} title={why}>
               <Icon name="play" />Sinh audio ({scope})
             </button>
-            <button className="btn primary" onClick={p.onVerify} disabled={!p.hasSet || actionDisabled}>
+            <button className="btn primary" onClick={p.onVerify} disabled={!p.hasSet || actionDisabled} title={why}>
               <Icon name="check" />Verify ({scope})
             </button>
-            <button className="btn" onClick={p.onRegenerate} disabled={!p.hasSet || actionDisabled}
-              title="Sinh audio mới (seed khác) — sau đó bấm Verify lại">
+            <button className="btn" onClick={p.onRegenerate} disabled={!p.hasSet || !!regenWhy || !!p.settingsSaving}
+              title={regenWhy ?? "Sinh audio mới (seed khác) — sau đó bấm Verify lại"}>
               <Icon name="refresh" />Sinh lại ({n ? n : "tất cả không đạt"})
             </button>
             <span className="spacer" />
@@ -71,13 +76,14 @@ export function RunBar(p: Props) {
         ) : p.appActions}
       </div>
 
-      {busy && (
-        <div className="progress-line" role="status">
-          <div className="progress"><div className="bar" style={{ width: `${pct}%` }} /></div>
-          <span className="small num">{p.job!.done}/{p.job!.total}</span>
-          <button className="btn danger small-btn" onClick={p.onStop}><Icon name="stop" size={12} />Dừng</button>
+      {p.jobs.map((j) => (
+        <div key={j.id} className="progress-line" role="status" aria-label={j.name}>
+          <span className="small ellipsis job-name" title={j.name}>{j.name}</span>
+          <div className="progress"><div className="bar" style={{ width: `${j.total ? (j.done / j.total) * 100 : 0}%` }} /></div>
+          <span className="small num">{j.done}/{j.total}</span>
+          <button className="btn danger small-btn" onClick={() => p.onStop(j.id)}><Icon name="stop" size={12} />Dừng</button>
         </div>
-      )}
+      ))}
 
       <div className="filters">
         <div className="chips">

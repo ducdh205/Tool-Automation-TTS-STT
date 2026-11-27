@@ -27,7 +27,14 @@ def test_deletion_op():
 def test_insertion_op():
     r = compare("bật đèn", "bật đèn nhé")
     assert r.ops[-1] == WordOp("ins", None, "nhé")
-    assert r.wer == 0.5
+    assert r.wer == pytest.approx(1 / 3)  # MER: 1 error / (1 error + 2 hits)
+
+
+def test_long_wrong_transcript_stays_within_100_percent():
+    # WER would be 5/2 = 250% here; MER caps at 100%
+    r = compare("bật ionizer", "nhắn tin cả kiếm tiền")
+    assert r.wer == 1.0
+    assert not r.correct
 
 
 def test_threshold():

@@ -36,8 +36,13 @@ export interface Settings {
   voice_speed?: number; max_regen: number; wer_threshold: number; app_wer_threshold?: number; reject_warn_ratio: number;
   wyoming_host: string; wyoming_port: number; stt_timeout_s: number; wyoming_cmd: string[]; port: number;
 }
-export interface Health { wyoming: boolean; wyoming_error: string | null; gpu: boolean; job: Job | null }
-export interface Job { id: string; name: string; done: number; total: number }
+/** `job` is the oldest running job; `jobs` lists them all (Block 1 and Block 2 may run side by side). */
+export interface Health { wyoming: boolean; wyoming_error: string | null; gpu: boolean; job: Job | null; jobs?: Job[] }
+/** block1 = generate / verify / regenerate, block2 = app test. One job per lane; on one set the lanes
+ * only clash when a job is `exclusive` (Sinh lại swaps WAVs an app test plays). */
+export type JobLane = "block1" | "block2";
+export interface Job { id: string; name: string; done: number; total: number; lane: JobLane; set_id: number | null;
+  exclusive?: boolean }
 export interface Voice { id: string; label: string }
 /** state: device | unauthorized | offline (Android) · no_wda (iPhone seen, WebDriverAgent not answering). */
 export interface DeviceInfo { serial: string; state: string; model: string | null; platform?: "android" | "ios" }
@@ -48,6 +53,11 @@ export type DeviceInputBody =
   | { action: "key"; key: DeviceKey }
   | { action: "text"; text: string };
 export interface DeviceStatus { adb: boolean; ios?: boolean; error: string | null; devices: DeviceInfo[]; busy?: string | null }
+/** GET/POST /api/ios/connect — the "Kết nối iPhone" button (starts WebDriverAgent + port forward). */
+export interface IosConnect {
+  state: "idle" | "starting" | "running" | "error"; step: string | null; error: string | null; detail: string | null;
+  udid: string | null; bundle: string | null; external: boolean;
+}
 export type TtsDeviceKind = "cpu" | "cuda";
 export interface CudaInstall { state: "idle" | "running" | "done" | "failed"; log_tail: string[]; error: string | null }
 /** GET /api/tts/device: chosen and loaded TTS device, NVIDIA / PyTorch CUDA probe, installer state. */
@@ -58,14 +68,16 @@ export interface TtsDevice {
 
 export interface ProgressEvent {
   job_id: string; kind: "item" | "progress" | "log" | "done" | "error" | "cancelled";
-  done: number; total: number; item: Item | AppResult | null; message: string | null;
+  done: number; total: number; item: Item | AppResult | null; message: string | null; lane?: JobLane | null;
 }
 
 export interface AppProfile {
   name: string; package: string; open_label: string; stop_label: string; idle_label: string;
   close_label: string; sheet_label: string; discard_label?: string;
   /** Start of the task-form line holding what the app heard, e.g. "Bạn nói: ". */
-  heard_prefix?: string; pre_delay_s: number; post_delay_s: number;
+  heard_prefix?: string;
+  /** Notice shown when the app caught nothing ("Chưa nghe rõ"); the sentence is spoken once more. */
+  not_heard_label?: string; pre_delay_s: number; post_delay_s: number;
   listen_timeout_s: number; result_timeout_s: number;
   /** Pause between two sentences of a Block 2 run (seconds). */
   between_delay_s?: number;
@@ -74,7 +86,7 @@ export type AppStatus = "Chờ" | "Đúng" | "Sai" | "Lỗi thao tác";
 export interface AppRun {
   id: number; audio_set_id: number; serial: string; device_model: string | null; profile_name: string;
   app_version: string | null; created_at: string; summary: Record<string, number>;
-  /** A result is "Đúng" when its WER (0..1) is at most this. */
+  /** A result is "Đúng" when its MER (0..1) is at most this. */
   wer_threshold: number;
 }
 export interface AppResult {
@@ -115,6 +127,9 @@ async function req<T>(method: string, url: string, body?: unknown): Promise<T> {
 
 export const api = {
   device: () => req<DeviceStatus>("GET", "/api/device"),
+  iosConnectStatus: () => req<IosConnect>("GET", "/api/ios/connect"),
+  iosConnect: () => req<IosConnect>("POST", "/api/ios/connect"),
+  iosDisconnect: () => req<IosConnect>("POST", "/api/ios/disconnect"),
   deviceInput: (serial: string, b: DeviceInputBody) =>
     req<{ ok: boolean }>("POST", `/api/device/${encodeURIComponent(serial)}/input`, b),
   inspect(file: File) {
@@ -143,7 +158,7 @@ export const api = {
     return req<{ id: number; missing_audio: number }>("POST", "/api/audio-sets/import", fd);
   },
   /** Every set + its WAVs, app runs, screenshots, reports and uploads; keeps settings and profiles. 409 while a job runs. */
-  /** Back to "Chờ" for every row of every set: drops WAVs, STT/WER results and app runs, keeps imported rows. 409 while a job runs. */
+  /** Back to "Chờ" for every row of every set: drops WAVs, STT/MER results and app runs, keeps imported rows. 409 while a job runs. */
   resetProgress: () => req<{ ok: boolean; items: number }>("DELETE", "/api/progress"),
   clearAllData: () => req<{ ok: boolean; sets: number }>("DELETE", "/api/data"),
   items: (setId: number) => req<Item[]>("GET", `/api/audio-sets/${setId}/items`),
@@ -156,7 +171,7 @@ export const api = {
   regenerate: (setId: number, itemIds: number[] | null) =>
     req<{ job_id: string }>("POST", `/api/audio-sets/${setId}/regenerate`, { item_ids: itemIds }),
   cancelJob: (jobId: string) => req<{ ok: boolean }>("POST", `/api/jobs/${jobId}/cancel`),
-  currentJob: () => req<Job | null>("GET", "/api/jobs/current"),
+  jobs: () => req<Job[]>("GET", "/api/jobs"),
   settings: () => req<Settings>("GET", "/api/settings"),
   saveSettings: (s: Settings) => req<Settings>("PUT", "/api/settings", s),
   voices: () => req<Voice[]>("GET", "/api/voices"),
@@ -184,7 +199,7 @@ export const api = {
     a.href = r.download_url;
     a.click();
   },
-  /** Grade the run again with another WER threshold (0..1); new runs start with it too. */
+  /** Grade the run again with another MER threshold (0..1); new runs start with it too. */
   setRunThreshold: (runId: number, werThreshold: number) =>
     req<AppRun>("PUT", `/api/app-runs/${runId}/threshold`, { wer_threshold: werThreshold }),
   resumeAppRun: (runId: number) => req<{ job_id: string }>("POST", `/api/app-runs/${runId}/resume`),

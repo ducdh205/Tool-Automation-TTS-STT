@@ -226,3 +226,53 @@ async def test_pause_unless_cancelled_returns_early():
     start = loop.time()
     await pause_unless_cancelled(0.05, asyncio.Event())
     assert loop.time() - start >= 0.04
+
+
+def sequenced(answers, texts=None):
+    """run_one replacement: per audio file, a list of successive answers (one per call)."""
+    calls: dict[str, int] = {}
+    texts = texts or {}
+
+    async def fake(dev, profile, wav, player, **_kw):
+        n = calls.get(wav.name, 0)
+        calls[wav.name] = n + 1
+        seq = answers.get(wav.name, [texts.get(wav.name, "ok")])
+        ans = seq[min(n, len(seq) - 1)]
+        return AppCapture(text=ans, log=[f"play {wav.name} #{n + 1}"], not_heard=ans is None)
+
+    fake.calls = calls
+    return fake
+
+
+async def test_not_heard_is_spoken_again_once_then_passes(env):
+    store, run_id, settings = env
+    ids = {r["text_tts"]: r["item_id"] for r in store.app_results(run_id)}
+    wav = f"{ids['bật đèn']}.wav"
+    fake = sequenced({wav: [None, "bật đèn"]})
+    events = await go(store, run_id, settings, fake)
+    r = by_text(store, run_id)["bật đèn"]
+    assert fake.calls[wav] == 2
+    assert r["status"] == AppStatus.PASSED.value
+    assert "#1" in r["log"] and "#2" in r["log"] and "Phát lại lần 2" in r["log"]
+    assert any(e.message and "phát lại lần 2" in e.message for e in events)
+
+
+async def test_not_heard_twice_moves_on(env):
+    store, run_id, settings = env
+    ids = {r["text_tts"]: r["item_id"] for r in store.app_results(run_id)}
+    wav = f"{ids['bật đèn']}.wav"
+    fake = sequenced({wav: [None, None, "bật đèn"]}, {f"{i}.wav": t for t, i in ids.items()})
+    await go(store, run_id, settings, fake)
+    r = by_text(store, run_id)
+    assert fake.calls[wav] == 2  # at most one retry
+    assert r["bật đèn"]["status"] == AppStatus.FAILED.value
+    assert r["tắt đèn"]["status"] == AppStatus.PASSED.value  # the run went on to the next sentence
+
+
+async def test_heard_text_is_not_retried(env):
+    store, run_id, settings = env
+    ids = {r["text_tts"]: r["item_id"] for r in store.app_results(run_id)}
+    wav = f"{ids['tắt đèn']}.wav"
+    fake = sequenced({wav: ["tắt đen"]})
+    await go(store, run_id, settings, fake)
+    assert fake.calls[wav] == 1

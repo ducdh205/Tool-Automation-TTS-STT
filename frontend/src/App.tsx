@@ -8,7 +8,9 @@ import { APP_STATUSES, passRate } from "./status";
 import { classifyEvent } from "./events";
 import { AppRunPanel } from "./components/AppRunPanel";
 import { connectEvents } from "./ws";
-import { jobAfterStart, jobFromServer } from "./jobState";
+import {
+  blockReason, jobAfterStart, jobsFromServer, laneBlocker, progressJob, removeJob, upsertJob,
+} from "./jobState";
 import { Sidebar, type Section } from "./components/Sidebar";
 import { RunBar } from "./components/RunBar";
 import { RunSettings } from "./components/RunSettings";
@@ -40,7 +42,10 @@ export default function App() {
   const [sets, setSets] = useState<AudioSet[]>([]);
   const [setId, setSetId] = useState<number | null>(null);
   const [items, setItems] = useState<Item[]>([]);
-  const [job, setJob] = useState<Job | null>(null);
+  // Block 1 and Block 2 may run side by side (on different audio sets).
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const jobsRef = useRef<Job[]>([]);
+  jobsRef.current = jobs;
   const [filter, setFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
   const [dialog, setDialog] = useState<"import" | "zip" | null>(null);
@@ -102,7 +107,7 @@ export default function App() {
       setSettings((s) => (s ? { ...s, app_wer_threshold: saved.wer_threshold } : s));
       if (appRunRef.current === runId) await loadAppResults(runId);
       const pct = Math.round(saved.wer_threshold * 1000) / 10;
-      notify(`Đã chấm lại lần test #${runId}: Đúng khi WER ≤ ${pct.toLocaleString("vi-VN")}%.`);
+      notify(`Đã chấm lại lần test #${runId}: Đúng khi MER ≤ ${pct.toLocaleString("vi-VN")}%.`);
     } catch (e) {
       notifyError(e);
       throw e;
@@ -163,10 +168,10 @@ export default function App() {
 
   useEffect(() => {
     loadSets().then((s) => { if (s[0]) setSetId(s[0].id); }).catch((e) => notify(e.message, "error"));
-    api.currentJob().then(setJob).catch(() => {});
+    api.jobs().then((cur) => setJobs((js) => jobsFromServer(js, cur))).catch(() => {});
     loadSettings();
     const poll = () => api.health()
-      .then((h) => { setHealth(h); setJob((j) => jobFromServer(j, h.job)); })
+      .then((h) => { setHealth(h); setJobs((js) => jobsFromServer(js, h.jobs ?? (h.job ? [h.job] : []))); })
       .catch(() => setHealth(null));
     poll();
     const t = window.setInterval(poll, 5000);
@@ -193,8 +198,7 @@ export default function App() {
 
   useEffect(() => connectEvents((e: ProgressEvent) => {
     const kind = classifyEvent(e);
-    const track = () =>
-      setJob((j) => (j ? { ...j, done: e.done, total: e.total } : { id: e.job_id, name: "", done: e.done, total: e.total }));
+    const track = () => setJobs((js) => progressJob(js, e));
     if (kind === "block1-item") {
       const it = e.item as Item;
       if (it.audio_set_id === setIdRef.current) setItems((prev) => prev.map((p) => (p.id === it.id ? it : p)));
@@ -207,23 +211,25 @@ export default function App() {
       const time = new Date().toLocaleTimeString("vi-VN");
       setJobLogs((l) => [...l, `${time} ${e.message}`].slice(-300));
     } else if (kind === "progress") {
-      setJob((j) => (j ? { ...j, done: e.done, total: e.total } : j));
+      track();
     } else {
       finishedJobs.current.add(e.job_id);
-      setJob(null);
+      const name = jobsRef.current.find((j) => j.id === e.job_id)?.name;
+      setJobs((js) => removeJob(js, e.job_id));
       loadSets().catch(() => {});
       if (setIdRef.current !== null) {
         loadItems(setIdRef.current).catch(() => {});
         loadAppRuns(setIdRef.current).catch(() => {});
       }
       if (appRunRef.current !== null) loadAppResults(appRunRef.current).catch(() => {});
-      if (e.kind === "done") notify("Đã chạy xong.");
-      if (e.kind === "cancelled") notify("Đã dừng. Bấm chạy lại để tiếp tục từ câu chưa xong.");
-      if (e.kind === "error") notify(`Job dừng vì lỗi: ${e.message}`, "error");
+      const of = name ? ` (${name})` : "";
+      if (e.kind === "done") notify(`Đã chạy xong${of}.`);
+      if (e.kind === "cancelled") notify(`Đã dừng${of}. Bấm chạy lại để tiếp tục từ câu chưa xong.`);
+      if (e.kind === "error") notify(`Job dừng vì lỗi${of}: ${e.message}`, "error");
     }
   }, (up) => {
     // After a (re)connect we may have missed a terminal event: ask the server.
-    if (up) api.currentJob().then((cur) => setJob((j) => jobFromServer(j, cur))).catch(() => {});
+    if (up) api.jobs().then((cur) => setJobs((js) => jobsFromServer(js, cur))).catch(() => {});
   }), [loadItems, loadSets, loadAppRuns, loadAppResults]);
 
   const appMode = section === "step2";
@@ -249,7 +255,7 @@ export default function App() {
     try {
       setJobLogs([]);
       const r = await api.startAppRun(setId, serial, profile, sel2.ids.size ? [...sel2.ids] : null);
-      setJob(jobAfterStart(r.job_id, finishedJobs.current));
+      setJobs((js) => upsertJob(js, jobAfterStart(r.job_id, finishedJobs.current, "block2", setId)));
       await loadAppRuns(setId, r.id);
     } catch (e) {
       notifyError(e);
@@ -261,7 +267,7 @@ export default function App() {
     try {
       setJobLogs([]);
       const r = await api.rerunAppRun(runId, serial, [...sel2.ids]);
-      setJob(jobAfterStart(r.job_id, finishedJobs.current));
+      setJobs((js) => upsertJob(js, jobAfterStart(r.job_id, finishedJobs.current, "block2", setId)));
       await Promise.all([loadAppRuns(setId, runId), loadAppResults(runId)]);
     } catch (e) {
       notifyError(e);
@@ -271,7 +277,7 @@ export default function App() {
   const resumeApp = async (runId: number) => {
     try {
       const r = await api.resumeAppRun(runId);
-      setJob(jobAfterStart(r.job_id, finishedJobs.current));
+      setJobs((js) => upsertJob(js, jobAfterStart(r.job_id, finishedJobs.current, "block2", setIdRef.current)));
     } catch (e) {
       notify((e as Error).message, "error");
     }
@@ -290,7 +296,8 @@ export default function App() {
     if (setId === null) return;
     try {
       const r = await api[action](setId, ids);
-      setJob(jobAfterStart(r.job_id, finishedJobs.current));
+      setJobs((js) => upsertJob(js, jobAfterStart(r.job_id, finishedJobs.current, "block1", setId,
+        action === "regenerate")));
     } catch (e) {
       notifyError(e);
     }
@@ -315,8 +322,8 @@ export default function App() {
     }
   };
 
-  const stop = async () => {
-    if (job) await api.cancelJob(job.id).catch((e) => notify(e.message, "error"));
+  const stop = async (jobId: string) => {
+    await api.cancelJob(jobId).catch((e) => notify(e.message, "error"));
   };
 
   const deleteSet = async (id: number) => {
@@ -373,6 +380,11 @@ export default function App() {
     }
   };
 
+  const block1Blocked = blockReason(laneBlocker(jobs, "block1", setId), "block1");
+  // "Sinh lại" swaps WAVs an app test on this set may be playing: it also waits for Block 2 here.
+  const regenBlocked = blockReason(laneBlocker(jobs, "block1", setId, true), "block1");
+  const block2Blocked = blockReason(laneBlocker(jobs, "block2", setId), "block2");
+  const anyJob = jobs[0] ?? null;
   const current = sets.find((s) => s.id === setId);
   const currentRun = appRuns.find((r) => r.id === appRunId);
   const listedItems = items.filter(step2Listed);
@@ -424,7 +436,7 @@ export default function App() {
         onExportSet={exportSet}
         onImportSet={importSet}
         onClearAll={clearAll}
-        deleteLocked={job ? `Đang chạy: ${job.name} — dừng job trước khi xóa, xuất hoặc nạp bộ audio` : null}
+        deleteLocked={anyJob ? `Đang chạy: ${anyJob.name} — dừng job trước khi xóa, xuất hoặc nạp bộ audio` : null}
         device={deviceStatus}
       />
       <main className="center">
@@ -446,7 +458,9 @@ export default function App() {
           selectedCount={selection.ids.size}
           onClearSelection={() => setSelection(emptySelection)}
           hasSet={setId !== null}
-          job={job}
+          jobs={jobs}
+          blocked={appMode ? block2Blocked : block1Blocked}
+          regenBlocked={regenBlocked}
           statuses={appMode ? APP_STATUSES : STATUSES}
           summary={summary}
           total={total}
@@ -462,7 +476,7 @@ export default function App() {
           onReport={report}
           settingsSaving={settingsSaving}
           settingsControls={settings ? (
-            <RunSettings settings={settings} busy={!!job} saving={settingsSaving} setCount={sets.length} onSave={saveSettings} />
+            <RunSettings settings={settings} busy={!!anyJob} saving={settingsSaving} setCount={sets.length} onSave={saveSettings} />
           ) : settingsLoadFailed ? (
             <span className="small">Chưa tải được cài đặt. <button className="link-btn" onClick={loadSettings}>Thử lại</button></span>
           ) : <span className="muted small">Đang tải cài đặt…</span>}
@@ -472,7 +486,8 @@ export default function App() {
             profiles={profiles}
             runs={appRuns}
             runId={appRunId}
-            busy={!!job || settingsSaving}
+            busy={!!block2Blocked || settingsSaving}
+            blockedReason={block2Blocked}
             readyCount={readyCount}
             selectedCount={sel2.ids.size}
             onExportForm={exportForm}
@@ -505,7 +520,7 @@ export default function App() {
               if (pos >= 0) setSelection((s) => clickRow(s, visibleSelectable, pos, shift));
             }}
             onToggleAll={() => setSelection((s) => toggleAllVisible(s, visibleSelectable))}
-            onRegenerate={appMode || job || settingsSaving ? undefined : (id) => startBlock1("regenerate", [id])}
+            onRegenerate={appMode || regenBlocked || settingsSaving ? undefined : (id) => startBlock1("regenerate", [id])}
           />
         )}
       </main>

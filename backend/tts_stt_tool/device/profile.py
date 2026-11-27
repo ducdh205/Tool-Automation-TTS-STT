@@ -24,6 +24,9 @@ class AppProfile:
     # Speaking opens a task form whose line "Bạn nói: “…”" holds what the app heard.
     # Empty = read the heard sentence from the chat bubbles only.
     heard_prefix: str = "Bạn nói: "
+    # Shown in the sheet when the app caught nothing ("Chưa nghe rõ. Thử lại hoặc gõ.");
+    # the sentence is then spoken once more. Empty = do not watch for it.
+    not_heard_label: str = "Chưa nghe rõ"
     pre_delay_s: float = 0.3  # after the mic is live
     post_delay_s: float = 1.0
     listen_timeout_s: float = 6.0

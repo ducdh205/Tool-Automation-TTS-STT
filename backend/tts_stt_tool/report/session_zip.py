@@ -37,7 +37,7 @@ def _result_text(r: dict[str, Any], audio_missing: bool) -> str:
         ("TC_ID", r.get("tc_id")), ("Sheet", r.get("sheet")), ("Lượt", r.get("turn")),
         ("Câu gốc", r.get("text_raw")), ("Câu đã đọc", r.get("text_tts")), ("Verify audio", r.get("verify")),
         ("Câu app nghe", (r.get("app_text") or "(app không trả câu)") if tested else ""),
-        ("Kết quả", r["status"]), ("WER", _pct(r.get("wer"))), ("CER", _pct(r.get("cer"))),
+        ("Kết quả", r["status"]), ("MER", _pct(r.get("wer"))), ("CER", _pct(r.get("cer"))),
         ("Từ sai", format_ops(r.get("ops") or [])),
     ]
     if r.get("error"):
@@ -65,7 +65,7 @@ def _session_info(store: Store, run: dict[str, Any], settings: Settings, results
         f"Phiên bản app: {run.get('app_version') or '—'}",
         f"Bắt đầu: {run.get('created_at')}",
         f"Kết thúc: {max(ends) if ends else '—'}",
-        f"Ngưỡng WER: {settings.wer_threshold:g}",
+        f"Ngưỡng MER: {settings.wer_threshold:g}",
         f"Số câu: {len(results)}",
         *(f"{st.value}: {summary.get(st.value, 0)}" for st in AppStatus),
         f"Audio kèm theo: {choice}",

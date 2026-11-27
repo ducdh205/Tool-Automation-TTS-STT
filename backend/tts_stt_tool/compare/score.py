@@ -1,4 +1,9 @@
-"""WER / CER scoring with word-level alignment."""
+"""MER / CER scoring with word-level alignment.
+
+The word score is MER (match error rate): (S + D + I) / (S + D + I + hits), always 0..1 —
+unlike WER, extra words in a long wrong transcript can't push it past 100%. It is still
+stored in the ``wer`` field/column so existing data and APIs keep working.
+"""
 
 from __future__ import annotations
 
@@ -22,7 +27,7 @@ class WordOp:
 
 @dataclass
 class CompareResult:
-    wer: float
+    wer: float  # holds MER (see module docstring)
     cer: float
     correct: bool
     ref_norm: str
@@ -50,7 +55,7 @@ def _align(ref_words: list[str], hyp_words: list[str]) -> list[WordOp]:
 
 
 def compare(ref: str, hyp: str, wer_threshold: float = 0.0) -> CompareResult:
-    """Score ``hyp`` against ``ref``. ``correct`` is ``wer <= wer_threshold``."""
+    """Score ``hyp`` against ``ref``. ``correct`` is ``mer <= wer_threshold``."""
     ref_norm = normalize(ref)
     hyp_norm = normalize(hyp)
     if not ref_norm:
@@ -59,7 +64,7 @@ def compare(ref: str, hyp: str, wer_threshold: float = 0.0) -> CompareResult:
     if not hyp_norm:
         ops = [WordOp("del", w, None) for w in ref_words]
         return CompareResult(1.0, 1.0, False, ref_norm, hyp_norm, ops)
-    wer = float(jiwer.wer(ref_norm, hyp_norm))
+    mer = float(jiwer.mer(ref_norm, hyp_norm))
     cer = float(jiwer.cer(ref_norm, hyp_norm))
     ops = _align(ref_words, hyp_norm.split())
-    return CompareResult(wer, cer, wer <= wer_threshold, ref_norm, hyp_norm, ops)
+    return CompareResult(mer, cer, mer <= wer_threshold, ref_norm, hyp_norm, ops)

@@ -48,7 +48,7 @@ def result_values(result: dict[str, Any]) -> tuple[str, str, str]:
         return "", f"Lỗi thao tác: {result.get('error') or ''}", ""
     if status not in (AppStatus.PASSED.value, AppStatus.FAILED.value):
         return "", "", ""
-    note = f"WER {_pct(result.get('wer'))} · CER {_pct(result.get('cer'))}"
+    note = f"MER {_pct(result.get('wer'))} · CER {_pct(result.get('cer'))}"
     if any(o.get("op") != "equal" for o in result.get("ops") or []):
         note += f" · sai: {format_ops(result['ops'])}"
     if result.get("text_tts") and result["text_tts"] != result.get("text_raw"):

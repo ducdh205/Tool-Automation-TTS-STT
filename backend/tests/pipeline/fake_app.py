@@ -23,7 +23,7 @@ class FakeApp:
                  launch_fixes: bool = True, silence_dumps: int | None = None,
                  keep_history: bool = False, mic_delay_checks: int = 0,
                  stop_during_dump: bool = False, leave_after_stop: bool = False,
-                 form_after_speech: bool = False):
+                 form_after_speech: bool = False, not_heard_notice: bool = False):
         self.transcript = transcript
         self.state = state
         self.auto_stop = auto_stop
@@ -38,6 +38,7 @@ class FakeApp:
         self._mic_live = mic_delay_checks == 0
         # App 2026-11: what was heard opens a task form ("Bạn nói: “…”") instead of a chat bubble.
         self.form_after_speech = form_after_speech
+        self.not_heard_notice = not_heard_notice  # idle sheet shows "Chưa nghe rõ. Thử lại hoặc gõ."
         self.heard: str | None = None
         self.drafts = 0  # "Giữ nháp" taps: junk drafts the tool must never leave behind
         self.bubbles: list[str] = []
@@ -84,6 +85,8 @@ class FakeApp:
             y = 900 + i * 100
             out.append(_n(b, (300, y, 680, y + 40), "android.view.View"))
             out.append(_n("Câu này chưa phải một việc cần làm.", (32, y + 50, 624, y + 90), "android.view.View"))
+        if self.state == "idle" and self.not_heard_notice and not self.bubbles:
+            out.append(_n("Chưa nghe rõ. Thử lại hoặc gõ.", (32, 1150, 400, 1190), "android.view.View"))
         out.append(UiNode("", "", "android.widget.EditText", (32, 1212, 688, 1388), True))
         out.append(_n("Còn lại 1.000 ký tự", (567, 1356, 656, 1388), "android.view.View"))
         out.append(_n("Dừng nghe" if self.state == "listening" else "Bấm để nói", SHEET_MIC))

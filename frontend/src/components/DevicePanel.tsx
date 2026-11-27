@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "./Icon";
+import { IosConnectBox } from "./IosConnect";
 import { api, type AppProfile, type DeviceInfo, type DeviceInputBody, type DeviceKey, type DeviceStatus, type UiNodeInfo } from "../api";
 
 const STATE_LABEL: Record<string, string> = {
   device: "Đã kết nối",
   unauthorized: "Chưa cho phép gỡ lỗi USB",
   offline: "Mất kết nối",
-  no_wda: "Chưa chạy WebDriverAgent",
+  no_wda: "Chưa kết nối iPhone",
 };
 
 function useDeviceStatus(): DeviceStatus | null {
@@ -201,9 +202,12 @@ export function DevicePanel({ jobLogs = [], profile = null, onProfileSaved }: Pr
   let screen;
   if (!status) screen = <Empty title="Đang kiểm tra thiết bị…" hint="" />;
   else if (!status.adb && !status.ios) screen = <Empty title="Không tìm thấy adb" hint="Đặt Android platform-tools vào vendor/platform-tools." />;
+  else if (!current && status.ios)
+    screen = <IosConnectBox title="Chưa kết nối thiết bị"
+      hint="Android: cắm cáp và bật Gỡ lỗi USB. iPhone: cắm cáp, mở khóa, bấm “Tin cậy” rồi bấm Kết nối iPhone." />;
   else if (!current) screen = <Empty title="Chưa kết nối thiết bị" hint="Cắm cáp USB và bật Gỡ lỗi USB trong Tùy chọn nhà phát triển." />;
   else if (current.state === "no_wda")
-    screen = <Empty title="Chưa chạy WebDriverAgent" hint="Chạy WebDriverAgent trên iPhone và chuyển cổng 8100 (ios.exe forward 8100 8100)." />;
+    screen = <IosConnectBox title="iPhone chưa sẵn sàng" hint="Mở khóa iPhone rồi bấm Kết nối iPhone." />;
   else if (current.state === "unauthorized")
     screen = <Empty title="Chờ cho phép trên điện thoại" hint="Mở khóa điện thoại và bấm “Cho phép” gỡ lỗi USB." />;
   else if (current.state !== "device") screen = <Empty title={STATE_LABEL[current.state] ?? current.state} hint="Thử rút ra cắm lại cáp." />;

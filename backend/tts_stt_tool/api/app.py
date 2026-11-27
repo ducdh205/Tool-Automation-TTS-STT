@@ -17,6 +17,7 @@ from tts_stt_tool.config import Settings
 from tts_stt_tool.device.adb import Adb
 from tts_stt_tool.device.goios import GoIos
 from tts_stt_tool.device.ios import IosHub
+from tts_stt_tool.device.wda_launcher import WdaLauncher
 from tts_stt_tool.jobs.runner import JobRunner
 from tts_stt_tool.store.db import Store
 from tts_stt_tool.stt.server_manager import REPO_ROOT, WyomingServerManager, default_wyoming_launch
@@ -45,6 +46,7 @@ class AppContext:
     background: set = field(default_factory=set)
     adb: Adb = field(default_factory=Adb)
     ios: IosHub = field(default_factory=lambda: IosHub(GoIos(enabled=False)))  # iPhones (go-ios + WDA)
+    wda_launcher: WdaLauncher | None = None  # "Kết nối iPhone": starts WDA + port forward
     device_factory: Callable[[str], Awaitable[Any]] | None = None  # serial -> DeviceDriver
     player: Any = None  # AudioPlayer
     busy_serial: str | None = None  # phone driven by a running block 2 job
@@ -132,6 +134,8 @@ def create_app(
         ctx.ios = ios
     elif device_factory is None:  # tests inject a fake phone: never touch a real iPhone there
         ctx.ios = IosHub(GoIos(), wda_url=settings.wda_url)
+    if ctx.ios.available:
+        ctx.wda_launcher = WdaLauncher(ctx.ios.goios, ctx.ios.wda, settings.data_dir / "ios", wda_url=settings.wda_url)
     if ctx.player is None:
         from tts_stt_tool.device.player import WinSoundPlayer
 
@@ -152,6 +156,8 @@ def create_app(
             ctx.background.add(task)
             task.add_done_callback(ctx.background.discard)
         yield
+        if ctx.wda_launcher is not None:
+            ctx.wda_launcher.stop()
         if ctx.wyoming is not None:
             ctx.wyoming.stop()
 

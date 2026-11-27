@@ -10,6 +10,7 @@ dependencies = [
     "librosa>=1.0.1",
     "numpy>=2.5.5",
     "openpyxl>=3.1.5",
+    "pymobiledevice3>=11.64.0",
     "python-multipart>=0.0.34",
     "soundfile>=0.14.0",
     "soxr>=1.1.0",

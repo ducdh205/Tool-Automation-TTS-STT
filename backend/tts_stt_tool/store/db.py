@@ -82,7 +82,7 @@ CREATE TABLE IF NOT EXISTS app_runs (
     audio_set_id INTEGER NOT NULL REFERENCES audio_sets(id) ON DELETE CASCADE,
     serial TEXT, device_model TEXT, profile_name TEXT, app_version TEXT,
     created_at TEXT NOT NULL,
-    wer_threshold REAL NOT NULL DEFAULT 0  -- a result is "Đúng" when its WER is at most this
+    wer_threshold REAL NOT NULL DEFAULT 0  -- a result is "Đúng" when its MER is at most this
 );
 CREATE TABLE IF NOT EXISTS app_results (
     id INTEGER PRIMARY KEY,
@@ -465,7 +465,7 @@ class Store:
     def set_app_threshold(self, run_id: int, wer_threshold: float) -> bool:
         """Change what counts as "Đúng" in this run and grade its finished results again.
 
-        Only "Đúng"/"Sai" rows change (an operation error or a waiting row has no WER); an empty
+        Only "Đúng"/"Sai" rows change (an operation error or a waiting row has no MER); an empty
         answer stays "Sai" whatever the threshold. Earlier attempts in the history keep their grade.
         """
         with self._conn() as c:

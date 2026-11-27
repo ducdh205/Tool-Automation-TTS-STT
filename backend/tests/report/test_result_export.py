@@ -21,10 +21,10 @@ def build(session, tmp_path):
 
 def test_result_values(session):
     ok, wrong, broken = (session.by_tc[t] for t in ("TC1", "TC2", "TC3"))
-    assert result_values(ok) == ("bật ionizer", "Pass", "WER 0% · CER 0%")
+    assert result_values(ok) == ("bật ionizer", "Pass", "MER 0% · CER 0%")
     text, verdict, note = result_values(wrong)
     assert (text, verdict) == ("mở cửa số", "Fail")
-    assert note.startswith("WER ") and " · CER " in note and "sai: sổ→số" in note
+    assert note.startswith("MER ") and " · CER " in note and "sai: sổ→số" in note
     assert result_values(broken) == ("", "Lỗi thao tác: Mic không bật", "")
     assert result_values({**ok, "status": AppStatus.PENDING.value}) == ("", "", "")
     assert result_values({**ok, "app_text": None})[0] == "(app không trả câu)"

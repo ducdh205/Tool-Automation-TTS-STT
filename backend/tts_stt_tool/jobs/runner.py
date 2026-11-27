@@ -1,4 +1,9 @@
-"""Single background job at a time, with progress events fan-out."""
+"""Background jobs with progress events fan-out.
+
+One job per lane at a time (Block 1 and Block 2 each have a lane). Jobs of both lanes may share an
+audio set unless one of them is ``exclusive`` on it: "Sinh lại" swaps the WAVs Block 2 plays, while
+"Sinh audio" only fills rows without audio (Block 2 never tests those) and Verify only reads WAVs.
+"""
 
 from __future__ import annotations
 
@@ -12,6 +17,7 @@ from typing import Any, Literal
 _LOG = logging.getLogger(__name__)
 
 EventKind = Literal["item", "progress", "log", "done", "error", "cancelled"]
+Lane = Literal["block1", "block2"]
 TERMINAL = ("done", "error", "cancelled")
 
 
@@ -23,6 +29,7 @@ class ProgressEvent:
     total: int
     item: dict | None = None
     message: str | None = None
+    lane: Lane | None = None  # filled in by the runner
 
     def to_json(self) -> dict[str, Any]:
         return asdict(self)
@@ -33,13 +40,16 @@ JobFactory = Callable[[Emit, asyncio.Event], Awaitable[None]]
 
 
 class JobBusyError(Exception):
-    """Another job is already running."""
+    """A job that conflicts with the new one is already running."""
+
+
+_PUBLIC = ("id", "name", "done", "total", "lane", "set_id", "exclusive")
 
 
 class JobRunner:
     def __init__(self) -> None:
         self._subscribers: list[asyncio.Queue[ProgressEvent]] = []
-        self._job: dict[str, Any] | None = None
+        self._jobs: dict[str, dict[str, Any]] = {}  # insertion order = start order
 
     def subscribe(self) -> asyncio.Queue[ProgressEvent]:
         q: asyncio.Queue[ProgressEvent] = asyncio.Queue()
@@ -50,22 +60,46 @@ class JobRunner:
         if q in self._subscribers:
             self._subscribers.remove(q)
 
-    def current(self) -> dict[str, Any] | None:
-        if self._job is None:
-            return None
-        return {k: self._job[k] for k in ("id", "name", "done", "total")}
+    def jobs(self) -> list[dict[str, Any]]:
+        """Running jobs, oldest first."""
+        return [{k: j[k] for k in _PUBLIC} for j in self._jobs.values()]
 
-    def start(self, name: str, factory: JobFactory) -> str:
-        if self._job is not None:
-            raise JobBusyError(f"Đang chạy: {self._job['name']}")
+    def busy(self) -> dict[str, Any] | None:
+        """Any running job (oldest), for actions that must wait for every job."""
+        jobs = self.jobs()
+        return jobs[0] if jobs else None
+
+    def conflict(self, lane: Lane, set_id: int | None, exclusive: bool = False) -> dict[str, Any] | None:
+        """The running job a new ``lane`` job on ``set_id`` would clash with, if any."""
+        for j in self.jobs():
+            if j["lane"] == lane:
+                return j
+            if set_id is not None and j["set_id"] == set_id and (exclusive or j["exclusive"]):
+                return j
+        return None
+
+    def check(self, lane: Lane, set_id: int | None, exclusive: bool = False) -> None:
+        j = self.conflict(lane, set_id, exclusive)
+        if j is not None:
+            same_set = set_id is not None and j["set_id"] == set_id and j["lane"] != lane
+            hint = " (cùng bộ audio)" if same_set else ""
+            raise JobBusyError(f"Đang chạy: {j['name']}{hint}")
+
+    def start(self, name: str, factory: JobFactory, *, lane: Lane = "block1", set_id: int | None = None,
+              exclusive: bool = False) -> str:
+        """``exclusive``: no job of the other lane may run on ``set_id`` meanwhile."""
+        self.check(lane, set_id, exclusive)
         job_id = uuid.uuid4().hex[:12]
         cancel = asyncio.Event()
-        self._job = {"id": job_id, "name": name, "done": 0, "total": 0, "cancel": cancel}
+        job: dict[str, Any] = {"id": job_id, "name": name, "done": 0, "total": 0, "lane": lane,
+                               "set_id": set_id, "exclusive": exclusive, "cancel": cancel}
+        self._jobs[job_id] = job
 
         def emit(event: ProgressEvent) -> None:
             event.job_id = job_id
-            if self._job and self._job["id"] == job_id:
-                self._job["done"], self._job["total"] = event.done, event.total
+            event.lane = lane
+            if job_id in self._jobs:
+                job["done"], job["total"] = event.done, event.total
             for q in list(self._subscribers):
                 q.put_nowait(event)
 
@@ -76,26 +110,26 @@ class JobRunner:
                 nonlocal ended
                 ended = ended or event.kind in TERMINAL
                 if event.kind in TERMINAL:
-                    self._job = None
+                    self._jobs.pop(job_id, None)
                 emit(event)
 
             try:
                 await factory(tracking_emit, cancel)
             except Exception as e:  # report, never crash the server
                 _LOG.exception("job %s failed", name)
-                done, total = (self._job or {}).get("done", 0), (self._job or {}).get("total", 0)
-                self._job = None
-                emit(ProgressEvent(job_id, "error", done, total, message=str(e)))
+                self._jobs.pop(job_id, None)
+                emit(ProgressEvent(job_id, "error", job["done"], job["total"], message=str(e)))
                 return
             if not ended:
-                self._job = None
+                self._jobs.pop(job_id, None)
                 emit(ProgressEvent(job_id, "done", 0, 0))
 
-        self._job["task"] = asyncio.create_task(wrapper())
+        job["task"] = asyncio.create_task(wrapper())
         return job_id
 
     def cancel(self, job_id: str) -> bool:
-        if self._job and self._job["id"] == job_id:
-            self._job["cancel"].set()
-            return True
-        return False
+        job = self._jobs.get(job_id)
+        if job is None:
+            return False
+        job["cancel"].set()
+        return True

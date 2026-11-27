@@ -1,4 +1,4 @@
-"""Normalize Vietnamese text before WER/CER scoring.
+"""Normalize Vietnamese text before MER/CER scoring.
 
 One function for Block 1 and Block 2 so both blocks score the same way.
 """

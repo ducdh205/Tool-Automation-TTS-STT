@@ -145,8 +145,8 @@ export function ItemTable({
         {showSheet && <span>Sheet</span>}
         <span>Câu đọc</span>
         <span>{app ? "Text app" : "Text STT tham chiếu"}</span>
-        <span className="num hint" title={`WER: tỉ lệ lỗi theo từ, dùng để chấm. Đạt khi WER ≤ ngưỡng, vượt ngưỡng thì ${verdict}.\nCER (số nhỏ): lỗi theo ký tự, chỉ để tham khảo. CER thấp mà WER cao thường là sai dấu.`}>
-          WER <small>CER</small>
+        <span className="num hint" title={`MER: tỉ lệ lỗi theo từ, dùng để chấm. Đạt khi MER ≤ ngưỡng, vượt ngưỡng thì ${verdict}.\nCER (số nhỏ): lỗi theo ký tự, chỉ để tham khảo. CER thấp mà MER cao thường là sai dấu.`}>
+          MER <small>CER</small>
         </span>
         {app && <span className="hint" title="Kết quả verify audio ở Bước 1 (STT tham chiếu). Câu chưa verify hoặc không đạt vẫn được test trên app.">Verify</span>}
         <span>Trạng thái</span>
