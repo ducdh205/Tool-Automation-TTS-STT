@@ -13,7 +13,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, Response
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from starlette.background import BackgroundTask
 
 from tts_stt_tool.api.app import AppContext
@@ -447,14 +447,24 @@ def get_settings(request: Request) -> dict[str, Any]:
     return ctx_of(request).settings.to_json()
 
 
+# Removed settings a page loaded before the upgrade still echoes back: dropped, not a 422.
+_LEGACY_SETTINGS = ("max_regen",)
+
+
 class SettingsIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_legacy(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            data = {k: v for k, v in data.items() if k not in _LEGACY_SETTINGS}
+        return data
 
     voice: str | None = None
     voice_trung: str | None = None
     voice_nam: str | None = None
     voice_speed: float = Field(default=1.0, ge=MIN_SPEED, le=MAX_SPEED)
-    max_regen: int = Field(ge=0, le=10)
     wer_threshold: float = Field(ge=0, le=1)
     # Block 2 default; changed from the app run toolbar, so the Block 1 form may leave it out
     app_wer_threshold: float | None = Field(default=None, ge=0, le=1)
@@ -858,15 +868,29 @@ def set_run_threshold(request: Request, run_id: int, body: ThresholdIn) -> dict[
     return {**(ctx.store.get_app_run(run_id) or {}), "summary": ctx.store.app_summary(run_id)}
 
 
+async def _require_same_app(ctx: AppContext, run: dict[str, Any], profile: AppProfile) -> None:
+    """409 when the phone's app is not the version this run started on: one run, one app version."""
+    if not run["app_version"]:
+        return
+    _, version = await _device_model_version(ctx, run["serial"], profile.package)
+    if version and version != run["app_version"]:
+        raise HTTPException(409, f"App đã đổi phiên bản ({run['app_version']} → {version})"
+                                 f" so với lần test #{run['id']} — tạo lần test mới")
+
+
 @router.post("/app-runs/{run_id}/resume")
 async def resume_app_run(request: Request, run_id: int) -> dict[str, str]:
     ctx = ctx_of(request)
     run = _require_run(ctx, run_id)
+    profile = _profile(ctx, run["profile_name"])
+    _require_lane_free(ctx, "block2", run["audio_set_id"])
+    await _require_same_app(ctx, run, profile)
     runs = [(run_id, run["serial"])]
     pair = ctx.store.get_app_run(run["pair_run_id"]) if run.get("pair_run_id") else None
     if pair is not None and await _connected(ctx, pair["serial"]):
+        await _require_same_app(ctx, pair, profile)
         runs.append((pair["id"], pair["serial"]))  # the other phone of this job is here too: go on together
-    return {"job_id": _start_block2(ctx, run["audio_set_id"], runs, _profile(ctx, run["profile_name"]))}
+    return {"job_id": _start_block2(ctx, run["audio_set_id"], runs, profile)}
 
 
 class RerunIn(BaseModel):
@@ -884,11 +908,7 @@ async def rerun_app_run(request: Request, run_id: int, body: RerunIn) -> dict[st
     if body.serial != run["serial"]:
         raise HTTPException(409, f"Lần test #{run_id} chạy trên máy {run['device_model'] or run['serial']}"
                                  " — chọn máy đó, hoặc tạo lần test mới")
-    if run["app_version"]:
-        _, version = await _device_model_version(ctx, body.serial, profile.package)
-        if version and version != run["app_version"]:
-            raise HTTPException(409, f"App đã đổi phiên bản ({run['app_version']} → {version})"
-                                     f" so với lần test #{run_id} — tạo lần test mới")
+    await _require_same_app(ctx, run, profile)
     if not ctx.store.rerun_app_results(run_id, body.item_ids):
         raise HTTPException(422, "Không có câu nào có audio trong các case đã chọn")
     return {"job_id": _start_block2(ctx, run["audio_set_id"], [(run_id, run["serial"])], profile)}

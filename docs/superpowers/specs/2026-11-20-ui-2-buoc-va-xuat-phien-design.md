@@ -107,6 +107,7 @@ Trạng thái câu: **Chờ → Đã sinh audio → Đạt / Audio không đạt
 - Dừng sau 3 lỗi STT liên tiếp (giữ hành vi hiện có) ở Verify; lỗi TTS từng câu → "Lỗi", chạy tiếp.
 - Sửa câu đọc trên bảng vẫn đưa câu về "Chờ" và xóa audio (giữ hành vi `_RESET_SQL`).
 - Cài đặt "số lần sinh lại tối đa" (`max_regen`) không còn dùng cho vòng lặp tự động; ẩn khỏi Cài đặt.
+  _(28/11/2026: đã bỏ hẳn khỏi `Settings`/API; PUT `/api/settings` từ trang cũ còn gửi `max_regen` vẫn được nhận và bỏ qua.)_
 - Xuất Excel / CSV Khối 1 giữ nguyên như hiện tại (cột "Số lần sinh" = `attempts`).
 
 ### 5.4 Bước 2: Phiên test app

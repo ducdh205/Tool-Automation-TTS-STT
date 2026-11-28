@@ -469,6 +469,49 @@ def test_resume_pair_when_partner_deleted(pair_ctx):
     wait_job_end(c)
 
 
+def fake_versions(monkeypatch, versions):
+    """The app version each phone reports (tests inject phones, which report none by default)."""
+    import tts_stt_tool.api.routes as routes
+
+    async def model_version(_ctx, serial, _package):
+        return f"model-{serial}", versions.get(serial)
+
+    monkeypatch.setattr(routes, "_device_model_version", model_version)
+
+
+def test_resume_and_rerun_refuse_an_upgraded_app(ctx, monkeypatch):
+    c, _, _, tmp_path = ctx
+    versions = {"SER": "1.0"}
+    fake_versions(monkeypatch, versions)
+    set_id, run_id = finished_run(c, tmp_path)
+    first = c.get(f"/api/app-runs/{run_id}/results").json()[0]
+    versions["SER"] = "2.0"  # the app was updated since this run
+
+    r = c.post(f"/api/app-runs/{run_id}/resume")
+    assert r.status_code == 409 and "1.0 → 2.0" in r.json()["detail"]
+    r = c.post(f"/api/app-runs/{run_id}/rerun", json={"serial": "SER", "item_ids": [first["item_id"]]})
+    assert r.status_code == 409 and "1.0 → 2.0" in r.json()["detail"]
+    assert c.get(f"/api/app-runs/{run_id}/results").json()[0]["history"] == []  # untouched
+
+    versions["SER"] = None  # version unreadable: no reason to refuse
+    assert c.post(f"/api/app-runs/{run_id}/resume").status_code == 200
+    wait_job_end(c)
+
+
+def test_resume_pair_refuses_when_the_partner_app_changed(pair_ctx, monkeypatch):
+    c, fakes, spk, tmp_path = pair_ctx
+    versions = {"SER": "1.0", "SER2": "1.0"}
+    fake_versions(monkeypatch, versions)
+    name = fast_profile(c)
+    set_id = verified_set(c, tmp_path)
+    r = c.post(f"/api/audio-sets/{set_id}/app-runs", json={"serial": "SER", "serial2": "SER2", "profile": name})
+    a = r.json()["id"]
+    wait_job_end(c)
+    versions["SER2"] = "1.1"
+    r = c.post(f"/api/app-runs/{a}/resume")
+    assert r.status_code == 409 and "1.0 → 1.1" in r.json()["detail"]
+
+
 def test_app_report_name_says_which_phone(ctx):
     c, _, _, tmp_path = ctx
     set_id, run_id = finished_run(c, tmp_path)

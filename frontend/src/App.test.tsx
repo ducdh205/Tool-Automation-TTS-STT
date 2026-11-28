@@ -6,7 +6,7 @@ vi.mock("./ws", () => ({ connectEvents: () => () => {} }));
 
 const settings: Settings = {
   voice: "voice-1", voice_trung: "voice-t", voice_nam: "voice-n", wer_threshold: 0, stt_timeout_s: 30, reject_warn_ratio: 0.1,
-  voice_speed: 1, max_regen: 3, wyoming_host: "localhost", wyoming_port: 10300, wyoming_cmd: [], port: 8765,
+  voice_speed: 1, wyoming_host: "localhost", wyoming_port: 10300, wyoming_cmd: [], port: 8765,
 };
 
 afterEach(() => vi.restoreAllMocks());

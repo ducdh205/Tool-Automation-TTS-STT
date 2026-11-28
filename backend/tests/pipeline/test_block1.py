@@ -59,7 +59,7 @@ def _item(tc, text):
 @pytest.fixture
 def env(tmp_path):
     store = Store(tmp_path / "t.db")
-    settings = Settings(data_dir=tmp_path, max_regen=3)
+    settings = Settings(data_dir=tmp_path)
     cache = AudioCache(tmp_path / "audio")
     return store, settings, cache
 

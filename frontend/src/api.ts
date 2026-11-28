@@ -33,7 +33,7 @@ export interface ColumnMapping {
 export interface Settings {
   voice: string | null; voice_trung: string | null; voice_nam: string | null;
   /** 1 = as synthesized; 0.7–1.3, pitch kept (Block 1 time-stretches the audio). */
-  voice_speed?: number; max_regen: number; wer_threshold: number; app_wer_threshold?: number; reject_warn_ratio: number;
+  voice_speed?: number; wer_threshold: number; app_wer_threshold?: number; reject_warn_ratio: number;
   wyoming_host: string; wyoming_port: number; stt_timeout_s: number; wyoming_cmd: string[]; port: number;
 }
 /** `job` is the oldest running job; `jobs` lists them all (Block 1 and Block 2 may run side by side). */

@@ -221,10 +221,10 @@ def test_websocket_receives_events(client, tmp_path):
 
 def test_settings_roundtrip_and_health(client):
     s = client.get("/api/settings").json()
-    assert s["max_regen"] == 3
-    s["max_regen"] = 4
+    assert "max_regen" not in s
+    s["wer_threshold"] = 0.25
     assert client.put("/api/settings", json=s).status_code == 200
-    assert client.get("/api/settings").json()["max_regen"] == 4
+    assert client.get("/api/settings").json()["wer_threshold"] == 0.25
     h = client.get("/api/health").json()
     assert set(h) >= {"wyoming", "gpu", "job"}
 
@@ -253,10 +253,17 @@ def test_patch_text_is_nfc(client, tmp_path):
 
 def test_settings_validation(client):
     s = client.get("/api/settings").json()
-    assert client.put("/api/settings", json={**s, "max_regen": "abc"}).status_code == 422
-    assert client.put("/api/settings", json={**s, "max_regen": -1}).status_code == 422
+    assert client.put("/api/settings", json={**s, "bogus": 1}).status_code == 422
     assert client.put("/api/settings", json={**s, "wer_threshold": 2}).status_code == 422
     assert client.put("/api/settings", json={**s, "stt_timeout_s": 0}).status_code == 422
+
+
+def test_settings_put_from_an_old_page_with_max_regen_still_saves(client):
+    """A tab opened before the upgrade echoes max_regen back: accepted and ignored, not a 422."""
+    s = client.get("/api/settings").json()
+    r = client.put("/api/settings", json={**s, "max_regen": 3, "wer_threshold": 0.1})
+    assert r.status_code == 200
+    assert r.json()["wer_threshold"] == 0.1 and "max_regen" not in r.json()
 
 
 def test_stt_timeout_applies_without_restart(tmp_path):
