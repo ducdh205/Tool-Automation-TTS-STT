@@ -7,8 +7,23 @@ from tts_stt_tool.compare.score import compare
 from tts_stt_tool.config import Settings
 from tts_stt_tool.device.profile import AppProfile
 from tts_stt_tool.models import InputItem
-from tts_stt_tool.pipeline.block2 import AppCapture, OperationError, run_block2
+from tts_stt_tool.pipeline.block2 import AppCapture, Lane, OperationError, pause_unless_cancelled, run_block2_multi
 from tts_stt_tool.store.db import AppStatus, ItemStatus, Store
+
+
+async def run_block2(store, app_run_id, dev, profile, player, settings, emit, cancel, run_one,
+                     shots_dir=None, pause=pause_unless_cancelled):
+    """One phone through ``run_block2_multi``, each try being one call of a ``run_one``-like fake."""
+
+    async def attempt(lanes, wav, player, checks):
+        kw = {"is_correct": checks[0]} if checks[0] is not None else {}
+        try:
+            return [await run_one(lanes[0].dev, profile, wav, player, **kw)]
+        except Exception as e:  # recorded as an operation error by the loop
+            return [e]
+
+    await run_block2_multi(store, [Lane(app_run_id, dev, shots_dir)], profile, player, settings, emit, cancel,
+                           attempt=attempt, pause=pause)
 
 
 def _item(tc, text):
@@ -32,16 +47,16 @@ def env(tmp_path):
 
 def scripted(answers):
     """run_one replacement: answers keyed by audio file name -> text | None | Exception."""
-    seen_prev = []
+    calls = []
 
-    async def fake(dev, profile, wav, player, prev_bubbles=None, **_kw):
-        seen_prev.append(prev_bubbles)
+    async def fake(dev, profile, wav, player, **_kw):
+        calls.append(wav.name)
         ans = answers.get(wav.name, "")
         if isinstance(ans, Exception):
             raise ans
         return AppCapture(text=ans, log=[f"play {wav.name}"], bubbles=[ans] if ans else [])
 
-    fake.seen_prev = seen_prev
+    fake.calls = calls
     return fake
 
 
@@ -87,7 +102,7 @@ async def test_resume_only_pending_and_op_errors(env):
     store.record_app_result(first["id"], AppStatus.PASSED, "bật đèn", compare("bật đèn", "bật đèn"), None, "")
     fake = scripted({})
     await go(store, run_id, settings, fake)
-    assert len(fake.seen_prev) == 6  # one call per remaining sentence
+    assert len(fake.calls) == 6  # one call per remaining sentence
 
 
 async def test_cancel_after_first(env):
@@ -125,7 +140,7 @@ async def test_failed_and_op_error_screenshots_saved(env, tmp_path):
     answers = {f"{ok['item_id']}.wav": ok["text_tts"], f"{wrong['item_id']}.wav": "sai bét",
                f"{broken['item_id']}.wav": OperationError("Bảng không mở")}
 
-    async def fake(dev, profile, wav, player, prev_bubbles=None, is_correct=None):
+    async def fake(dev, profile, wav, player, is_correct=None):
         ans = answers.get(wav.name, "")
         if isinstance(ans, Exception):
             raise ans
@@ -162,7 +177,7 @@ async def test_screenshot_save_failure_keeps_result(env, tmp_path):
     store, run_id, settings = env
     first = store.app_results(run_id)[0]
 
-    async def fake(dev, profile, wav, player, prev_bubbles=None, is_correct=None):
+    async def fake(dev, profile, wav, player, is_correct=None):
         return AppCapture(text="sai bét", log=[], screenshot=b"\x89PNG-fake")
 
     blocked = tmp_path / "not-a-dir"

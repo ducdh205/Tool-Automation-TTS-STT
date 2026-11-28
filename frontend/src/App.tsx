@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  api, ApiError, STATUSES, type AppProfile, type AppResult, type AppRun, type AudioSet, type DeviceStatus, type Health,
+  api, ApiError, STATUSES, type AppProfile, type AppResult, type AppRun, type AudioSet, type Health,
   type Item, type Job, type ProgressEvent, type Settings,
 } from "./api";
 import { formatPct } from "./format";
@@ -22,6 +22,7 @@ import { PairTabs } from "./components/PairTabs";
 import { ExportZipDialog, type ZipAudio } from "./components/ExportZipDialog";
 import { clickRow, emptySelection, prune, toggleAllVisible, type Selection } from "./selection";
 import { useToast } from "./useToast";
+import { useDeviceStatus } from "./useDeviceStatus";
 
 function countBy<T>(rows: Iterable<T>, key: (r: T) => string | undefined): Record<string, number> {
   const out: Record<string, number> = {};
@@ -56,7 +57,9 @@ export default function App() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [settingsLoadFailed, setSettingsLoadFailed] = useState(false);
   const [settingsSaving, setSettingsSaving] = useState(false);
-  const [deviceStatus, setDeviceStatus] = useState<DeviceStatus | null>(null);
+  // One poller for the sidebar, the app run panel and the phone panel: faster while the phone panel shows (step 2).
+  const device = useDeviceStatus(section === "step2" ? 2000 : 4000);
+  const deviceStatus = device.status;
   const devices = deviceStatus?.devices ?? [];
   const [profiles, setProfiles] = useState<AppProfile[]>([]);
   const [appRuns, setAppRuns] = useState<AppRun[]>([]);
@@ -149,10 +152,6 @@ export default function App() {
 
   useEffect(() => {
     api.profiles().then(setProfiles).catch(() => {});
-    const tick = () => api.device().then(setDeviceStatus).catch(() => setDeviceStatus(null));
-    tick();
-    const t = window.setInterval(tick, 4000);
-    return () => window.clearInterval(t);
   }, []);
 
   useEffect(() => {
@@ -529,6 +528,7 @@ export default function App() {
       </main>
       {appMode && (
         <DevicePanel
+          device={device}
           jobLogs={logsFor(jobLogs, appRunId)}
           serial={currentRun?.serial ?? null}
           profile={profiles[0] ?? null}

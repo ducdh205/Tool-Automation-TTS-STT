@@ -408,12 +408,6 @@ def cancel_job(request: Request, job_id: str) -> dict[str, bool]:
     return {"ok": True}
 
 
-@router.get("/jobs/current")
-def current_job(request: Request) -> dict[str, Any] | None:
-    """The oldest running job (kept for old clients; /jobs lists them all)."""
-    return ctx_of(request).runner.busy()
-
-
 @router.get("/jobs")
 def list_jobs(request: Request) -> list[dict[str, Any]]:
     return ctx_of(request).runner.jobs()

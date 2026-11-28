@@ -3,6 +3,7 @@ import { startMirror, streamSupported, type StreamSession } from "../scrcpy";
 import { Icon } from "./Icon";
 import { IosConnectBox } from "./IosConnect";
 import { api, type AppProfile, type DeviceInfo, type DeviceInputBody, type DeviceKey, type DeviceStatus, type UiNodeInfo } from "../api";
+import type { DeviceState } from "../useDeviceStatus";
 
 const STATE_LABEL: Record<string, string> = {
   device: "Đã kết nối",
@@ -11,24 +12,9 @@ const STATE_LABEL: Record<string, string> = {
   no_wda: "Chưa kết nối iPhone",
 };
 
-function useDeviceStatus(): DeviceStatus | null {
-  const [status, setStatus] = useState<DeviceStatus | null>(null);
-  useEffect(() => {
-    let alive = true;
-    let timer: number;
-    const tick = async () => {
-      try {
-        const s = await api.device();
-        if (alive) setStatus(s);
-      } catch (e) {
-        if (alive) setStatus({ adb: false, error: String(e), devices: [] });
-      }
-      if (alive) timer = window.setTimeout(tick, 2000);
-    };
-    tick();
-    return () => { alive = false; window.clearTimeout(timer); };
-  }, []);
-  return status;
+/** What the panel shows: a failed request reads as "no adb" with the reason, as before. */
+function shownStatus({ status, error }: DeviceState): DeviceStatus | null {
+  return status ?? (error ? { adb: false, error, devices: [] } : null);
 }
 
 /** Pointer position on an object-fit:contain picture of nw x nh -> picture pixels (null = outside it). */
@@ -189,6 +175,8 @@ const ROLES: { key: keyof AppProfile; label: string }[] = [
 ];
 
 interface Props {
+  /** Phones from the app's single /api/device poller (see useDeviceStatus). */
+  device: DeviceState;
   /** Lines from the running Block 2 job (newest last). */
   jobLogs?: string[];
   /** Profile that pin mode assigns labels to. */
@@ -198,8 +186,8 @@ interface Props {
   serial?: string | null;
 }
 
-export function DevicePanel({ jobLogs = [], profile = null, onProfileSaved, serial = null }: Props) {
-  const status = useDeviceStatus();
+export function DevicePanel({ device, jobLogs = [], profile = null, onProfileSaved, serial = null }: Props) {
+  const status = shownStatus(device);
   const [pinning, setPinning] = useState(false);
   const [pinned, setPinned] = useState<UiNodeInfo | null>(null);
   const [pinError, setPinError] = useState<string | null>(null);

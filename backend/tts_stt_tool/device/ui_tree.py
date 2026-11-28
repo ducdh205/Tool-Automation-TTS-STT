@@ -153,12 +153,6 @@ def right_bubbles(nodes: list[UiNode], screen_w: int) -> list[UiNode]:
     return sorted(out, key=lambda n: n.bounds[1])
 
 
-def new_bubble(before: list[UiNode], after: list[UiNode], screen_w: int) -> UiNode | None:
-    """The transcript bubble added between two dumps (by count, so repeated text still counts)."""
-    old, new = right_bubbles(before, screen_w), right_bubbles(after, screen_w)
-    return new[-1] if len(new) > len(old) else None
-
-
 def bubble_labels(nodes: list[UiNode], screen_w: int) -> list[str]:
     return [n.label for n in right_bubbles(nodes, screen_w)]
 

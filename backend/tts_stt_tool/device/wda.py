@@ -108,10 +108,6 @@ class WdaClient:
         v = await self._session_call("GET", "/window/size")
         return int(v["width"]), int(v["height"])
 
-    async def active_app(self) -> str | None:
-        v = await self._request("GET", "/wda/activeAppInfo")
-        return (v or {}).get("bundleId")
-
     # -- acting -------------------------------------------------------------------
     async def tap(self, x: float, y: float) -> None:
         await self._session_call("POST", "/wda/tap", {"x": x, "y": y})

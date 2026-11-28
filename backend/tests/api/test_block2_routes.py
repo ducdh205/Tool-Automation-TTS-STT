@@ -433,7 +433,7 @@ def test_busy_lists_both_phones(pair_ctx):
     time.sleep(0.3)
     assert c.get("/api/device").json()["busy"] == ["SER", "SER2"]
     assert c.post("/api/device/SER2/input", json={"action": "tap", "x": 1, "y": 1}).status_code == 409
-    c.post(f"/api/jobs/{c.get('/api/jobs/current').json()['id']}/cancel")
+    c.post(f"/api/jobs/{c.get('/api/jobs').json()[0]['id']}/cancel")
     wait_job_end(c, timeout=30)
     assert c.get("/api/device").json()["busy"] == []
 

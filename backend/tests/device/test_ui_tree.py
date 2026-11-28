@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from tts_stt_tool.device.adb import Adb, AdbError, parse_wm_size
-from tts_stt_tool.device.ui_tree import UiNode, find, new_bubble, parse_dump, right_bubbles
+from tts_stt_tool.device.ui_tree import UiNode, bubble_labels, find, new_bubble_after, parse_dump, right_bubbles
 
 FIX = Path(__file__).resolve().parents[1] / "fixtures"
 
@@ -35,7 +35,7 @@ def test_right_bubbles_only_user_side():
 
 
 def test_new_bubble_after_stop():
-    b = new_bubble(load("ui_listening"), load("ui_stopped"), 720)
+    b = new_bubble_after(bubble_labels(load("ui_listening"), 720), load("ui_stopped"), 720)
     assert b is not None
     assert b.label == "chỉnh nhiệt độ ghế lái lên 24 độ"
 
@@ -48,15 +48,15 @@ def test_repeated_identical_bubble_is_detected():
     """Review #2: same sentence twice -> detect by count/position, not by text set."""
     before = [_bubble("bật đèn", 900)]
     after = [_bubble("bật đèn", 900), _bubble("bật đèn", 1000)]
-    b = new_bubble(before, after, 720)
+    b = new_bubble_after(bubble_labels(before, 720), after, 720)
     assert b is not None and b.bounds[1] == 1000
-    assert new_bubble(before, list(before), 720) is None
+    assert new_bubble_after(bubble_labels(before, 720), list(before), 720) is None
 
 
 def test_left_bubble_not_counted():
     left = UiNode(text="", desc="Chưa nghe rõ. Thử lại hoặc gõ.", cls="android.view.View",
                   bounds=(32, 836, 624, 876), clickable=False)
-    assert new_bubble([], [left], 720) is None
+    assert new_bubble_after([], [left], 720) is None
 
 
 class FlakyAdb(Adb):

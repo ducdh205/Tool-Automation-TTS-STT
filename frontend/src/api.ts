@@ -115,19 +115,27 @@ export class ApiError extends Error {
   }
 }
 
-async function req<T>(method: string, url: string, body?: unknown): Promise<T> {
+/** fetch options carrying ``body`` (a FormData as is, anything else as JSON). */
+function withBody(method: string, body?: unknown): RequestInit {
   const init: RequestInit = { method };
   if (body instanceof FormData) init.body = body;
   else if (body !== undefined) {
     init.body = JSON.stringify(body);
     init.headers = { "Content-Type": "application/json" };
   }
-  const r = await fetch(url, init);
-  if (!r.ok) {
-    let msg = `${r.status}`;
-    try { msg = (await r.json()).detail ?? msg; } catch { /* not json */ }
-    throw new ApiError(msg, r.status);
-  }
+  return init;
+}
+
+/** The server's ``detail`` message of a failed response, else ``fallback``. */
+async function failure(r: Response, fallback: string): Promise<ApiError> {
+  let msg = fallback;
+  try { msg = (await r.json()).detail ?? msg; } catch { /* not json */ }
+  return new ApiError(msg, r.status);
+}
+
+async function req<T>(method: string, url: string, body?: unknown): Promise<T> {
+  const r = await fetch(url, withBody(method, body));
+  if (!r.ok) throw await failure(r, `${r.status}`);
   return r.json() as Promise<T>;
 }
 
@@ -223,17 +231,8 @@ export const api = {
 
 /** POST, then save the response as a file named by the server (Content-Disposition). */
 export async function downloadFile(url: string, body: unknown, fallbackName: string): Promise<void> {
-  const init: RequestInit = { method: "POST" };
-  if (body !== undefined) {
-    init.body = JSON.stringify(body);
-    init.headers = { "Content-Type": "application/json" };
-  }
-  const r = await fetch(url, init);
-  if (!r.ok) {
-    let msg = `Xuất file lỗi (${r.status})`;
-    try { msg = (await r.json()).detail ?? msg; } catch { /* not json */ }
-    throw new ApiError(msg, r.status);
-  }
+  const r = await fetch(url, withBody("POST", body));
+  if (!r.ok) throw await failure(r, `Xuất file lỗi (${r.status})`);
   const cd = r.headers.get("content-disposition") ?? "";
   const m = /filename\*=utf-8''([^;]+)|filename="?([^";]+)"?/i.exec(cd);
   const name = m ? decodeURIComponent(m[1] ?? m[2]) : fallbackName;

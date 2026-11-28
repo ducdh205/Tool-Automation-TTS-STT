@@ -54,7 +54,7 @@ def create_set(client, tmp_path):
 def wait_job_end(client, timeout=10):
     t = time.time()
     while time.time() - t < timeout:
-        if client.get("/api/jobs/current").json() is None:
+        if client.get("/api/jobs").json() == []:
             return
         time.sleep(0.05)
     raise AssertionError("job did not finish")
@@ -200,7 +200,7 @@ def test_second_job_while_running_is_409(tmp_path):
         assert c.post(f"/api/audio-sets/{set_id}/verify").status_code == 200
         assert c.post(f"/api/audio-sets/{set_id}/verify").status_code == 409
         assert c.post(f"/api/audio-sets/{set_id}/regenerate", json={"item_ids": None}).status_code in (409, 422)
-        job = c.get("/api/jobs/current").json()
+        job = c.get("/api/jobs").json()[0]
         assert c.post(f"/api/jobs/{job['id']}/cancel").status_code == 200
         wait_job_end(c)
 
@@ -365,7 +365,7 @@ def test_delete_audio_set_while_job_runs_is_409(tmp_path):
         assert c.post(f"/api/audio-sets/{set_id}/verify").status_code == 200
         assert c.delete(f"/api/audio-sets/{set_id}").status_code == 409
         assert c.get(f"/api/audio-sets/{set_id}/items").status_code == 200
-        job = c.get("/api/jobs/current").json()
+        job = c.get("/api/jobs").json()[0]
         c.post(f"/api/jobs/{job['id']}/cancel")
         wait_job_end(c)
 
@@ -385,7 +385,7 @@ def test_clear_all_data_while_job_runs_is_409(tmp_path):
         assert c.post(f"/api/audio-sets/{set_id}/verify").status_code == 200
         assert c.delete("/api/data").status_code == 409
         assert c.get(f"/api/audio-sets/{set_id}/items").status_code == 200
-        job = c.get("/api/jobs/current").json()
+        job = c.get("/api/jobs").json()[0]
         c.post(f"/api/jobs/{job['id']}/cancel")
         wait_job_end(c)
 
@@ -548,7 +548,7 @@ def test_export_and_import_while_job_runs_are_409(tmp_path):
         assert c.post(f"/api/audio-sets/{set_id}/export").status_code == 409
         assert import_set_zip(c, data).status_code == 409
         assert len(c.get("/api/audio-sets").json()) == 1
-        job = c.get("/api/jobs/current").json()
+        job = c.get("/api/jobs").json()[0]
         c.post(f"/api/jobs/{job['id']}/cancel")
         wait_job_end(c)
 

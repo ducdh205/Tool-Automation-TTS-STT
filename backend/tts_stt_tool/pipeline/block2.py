@@ -217,7 +217,6 @@ async def run_one(
     wav: Path,
     player: AudioPlayer,
     sleep: Sleep = asyncio.sleep,
-    prev_bubbles: list[str] | None = None,  # kept for callers; the baseline is now measured
     is_correct: Callable[[str], bool] | None = None,
 ) -> AppCapture:
     """Speak one sentence to the app and read what it heard.
@@ -481,32 +480,6 @@ def default_attempt(profile: AppProfile, sleep: Sleep = asyncio.sleep) -> Attemp
         return out
 
     return attempt
-
-
-async def run_block2(
-    store: Store,
-    app_run_id: int,
-    dev: DeviceDriver,
-    profile: AppProfile,
-    player: AudioPlayer,
-    settings: Settings,
-    emit: Emit,
-    cancel: asyncio.Event,
-    run_one: Callable[..., Awaitable[AppCapture]] = run_one,
-    shots_dir: Path | None = None,
-    pause: Callable[[float, asyncio.Event], Awaitable[None]] = pause_unless_cancelled,
-) -> None:
-    """One phone: ``run_block2_multi`` with a single lane, each try being one ``run_one`` call."""
-
-    async def attempt(lanes: list[Lane], wav: Path, player: AudioPlayer, checks: list[Check]):
-        kw = {"is_correct": checks[0]} if checks[0] is not None else {}
-        try:
-            return [await run_one(lanes[0].dev, profile, wav, player, **kw)]
-        except Exception as e:  # noqa: BLE001 — recorded as an operation error by the loop
-            return [e]
-
-    await run_block2_multi(store, [Lane(app_run_id, dev, shots_dir)], profile, player, settings, emit, cancel,
-                           attempt=attempt, pause=pause)
 
 
 def _save_shot(shots_dir: Path | None, result_id: int, png: bytes | None, log: list[str]) -> str | None:
