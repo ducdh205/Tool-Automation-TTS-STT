@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+import struct
 import uuid
+import zlib
 import xml.etree.ElementTree as ET
 import shutil
 import subprocess
@@ -60,6 +62,8 @@ class Adb:
         self.timeout_s = timeout_s
         self._screen_lock = asyncio.Lock()
         self._dump_locks: dict[str, asyncio.Lock] = {}
+        # serial -> whether ``uiautomator dump /dev/tty`` works there (absent = not tried yet)
+        self._tty_dump: dict[str, bool] = {}
 
     @property
     def available(self) -> bool:
@@ -85,9 +89,17 @@ class Adb:
         return parse_devices((await self.run("devices", "-l")).decode("utf-8", "replace"))
 
     async def screencap(self, serial: str) -> bytes:
-        """PNG of the current screen."""
+        """PNG of the current screen.
+
+        Raw pixels are encoded on the PC: the phone's own PNG encoder (``screencap -p``) takes
+        most of the time a capture costs. A raw frame this code cannot read falls back to it.
+        """
         async with self._screen_lock:  # one capture at a time; phones choke on parallel screencap
-            png = await self.run("-s", serial, "exec-out", "screencap", "-p")
+            raw = await self.run("-s", serial, "exec-out", "screencap")
+            try:
+                return await asyncio.to_thread(raw_to_png, raw)
+            except ValueError:
+                png = await self.run("-s", serial, "exec-out", "screencap", "-p")
         if not png.startswith(b"\x89PNG"):
             raise AdbError("screencap không trả về ảnh PNG")
         return png
@@ -96,34 +108,53 @@ class Adb:
         return self._dump_locks.setdefault(serial, asyncio.Lock())
 
     async def dump_ui(self, serial: str, attempts: int = 3) -> str:
-        """``uiautomator dump`` XML.
+        """``uiautomator dump`` XML. One dump per phone at a time (only one UiAutomation client can run).
 
-        A failed dump ("could not get idle state" while the screen animates) still exits 0 and
+        Fast path: ``exec-out uiautomator dump /dev/tty`` prints the XML in one adb call instead
+        of four (rm, dump, cat, rm). A phone where that has never worked uses the sdcard file from
+        then on; once it has worked, a failure is a flaky dump (screen animating) and is retried,
+        with the file as a last resort.
+        """
+        async with self._serial_lock(serial):
+            works = self._tty_dump.get(serial)
+            if works is not False:
+                for _ in range(attempts if works else 1):
+                    try:
+                        out = await self.run("-s", serial, "exec-out", "uiautomator", "dump", "/dev/tty")
+                        xml = tty_dump_xml(out.decode("utf-8", "replace"))
+                    except (AdbError, ValueError, ET.ParseError):
+                        continue
+                    self._tty_dump[serial] = True
+                    return xml
+                if works is None:
+                    self._tty_dump[serial] = False
+            return await self._dump_via_file(serial, attempts)
+
+    async def _dump_via_file(self, serial: str, attempts: int) -> str:
+        """A failed dump ("could not get idle state" while the screen animates) still exits 0 and
         leaves the previous file behind, so: own file per call, delete it first, require the
-        "dumped to" confirmation and a parsable document; retry otherwise. One dump per phone
-        at a time (only one UiAutomation client can run).
+        "dumped to" confirmation and a parsable document; retry otherwise.
         """
         path = f"/sdcard/tts_stt_ui_{uuid.uuid4().hex[:8]}.xml"
         last = ""
-        async with self._serial_lock(serial):
-            try:
-                for _ in range(attempts):
-                    try:
-                        await self.run("-s", serial, "shell", "rm", "-f", path)
-                        out = (await self.run("-s", serial, "shell", "uiautomator", "dump", path)).decode("utf-8", "replace")
-                        if "dumped to" not in out:
-                            last = out.strip()[:200]
-                            continue
-                        xml = (await self.run("-s", serial, "exec-out", "cat", path)).decode("utf-8", "replace")
-                        ET.fromstring(xml[xml.index("<"):])
-                        return xml
-                    except (AdbError, ValueError, ET.ParseError) as e:
-                        last = str(e)[:200]
-            finally:
+        try:
+            for _ in range(attempts):
                 try:
                     await self.run("-s", serial, "shell", "rm", "-f", path)
-                except AdbError:
-                    pass
+                    out = (await self.run("-s", serial, "shell", "uiautomator", "dump", path)).decode("utf-8", "replace")
+                    if "dumped to" not in out:
+                        last = out.strip()[:200]
+                        continue
+                    xml = (await self.run("-s", serial, "exec-out", "cat", path)).decode("utf-8", "replace")
+                    ET.fromstring(xml[xml.index("<"):])
+                    return xml
+                except (AdbError, ValueError, ET.ParseError) as e:
+                    last = str(e)[:200]
+        finally:
+            try:
+                await self.run("-s", serial, "shell", "rm", "-f", path)
+            except AdbError:
+                pass
         raise AdbError(f"uiautomator dump lỗi sau {attempts} lần: {last}")
 
     async def mic_active(self, serial: str) -> bool:
@@ -153,6 +184,42 @@ class Adb:
     async def text(self, serial: str, text: str) -> None:
         """Type ASCII text (``input text`` cannot type Vietnamese diacritics)."""
         await self.run("-s", serial, "shell", "input", "text", escape_input_text(text))
+
+
+_HIERARCHY_END = "</hierarchy>"
+
+
+def tty_dump_xml(out: str) -> str:
+    """The XML in ``uiautomator dump /dev/tty`` output (the XML, then "UI hierchary dumped to: …")."""
+    if "dumped to" not in out:
+        raise ValueError(out.strip()[:200] or "uiautomator dump: không có kết quả")
+    xml = out[out.index("<"):out.rindex(_HIERARCHY_END) + len(_HIERARCHY_END)]
+    ET.fromstring(xml)
+    return xml
+
+
+def raw_to_png(raw: bytes) -> bytes:
+    """``screencap`` raw frame (w, h, format[, colour space] + RGBA/RGBX pixels) -> PNG.
+
+    Pixels are forced opaque: RGBX frames leave the 4th byte undefined.
+    """
+    if len(raw) < 12:
+        raise ValueError("screencap: khung ảnh quá ngắn")
+    w, h, fmt = struct.unpack_from("<III", raw)
+    size = w * h * 4
+    header = len(raw) - size
+    if fmt not in (1, 2) or not w or not h or header not in (12, 16):
+        raise ValueError(f"screencap: không đọc được khung ảnh raw (format {fmt}, {w}x{h})")
+    px = bytearray(raw[header:])
+    px[3::4] = b"\xff" * (w * h)
+    stride = w * 4
+    rows = b"".join(b"\x00" + px[i:i + stride] for i in range(0, size, stride))
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(rows, 3)) + chunk(b"IEND", b""))
 
 
 _MIC_ACTIVE = re.compile(r"riid \d+; active\? true")
