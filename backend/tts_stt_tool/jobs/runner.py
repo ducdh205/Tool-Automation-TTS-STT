@@ -121,8 +121,9 @@ class JobRunner:
                 self._jobs.pop(job_id, None)
                 emit(ProgressEvent(job_id, "error", job["done"], job["total"], message=str(e)))
                 return
-            if not ended:
+            finally:  # also when the task itself is cancelled (shutdown): never leave the lane taken
                 self._jobs.pop(job_id, None)
+            if not ended:
                 emit(ProgressEvent(job_id, "done", 0, 0))
 
         job["task"] = asyncio.create_task(wrapper())

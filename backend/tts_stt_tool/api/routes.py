@@ -26,7 +26,8 @@ from tts_stt_tool.device.ui_tree import UiNode, node_at, parse_dump
 from tts_stt_tool.input.filters import clean_text, has_words
 from tts_stt_tool.input.generic import ColumnMapping, preview_sheet, read_items, sheet_names
 from tts_stt_tool.input.testcase_form import InputError
-from tts_stt_tool.jobs.runner import JobBusyError, Lane
+from tts_stt_tool.jobs.runner import JobBusyError
+from tts_stt_tool.jobs.runner import Lane as JobLane
 from tts_stt_tool.pipeline.block1 import run_generate, run_verify
 from tts_stt_tool.pipeline.block2 import Lane, run_block2_multi
 from tts_stt_tool.report.audio_set_zip import PackError, build_audio_set_zip, import_audio_set_zip, pack_name
@@ -335,7 +336,7 @@ class ItemIdsIn(BaseModel):
     item_ids: list[int] | None = None  # None = every eligible row
 
 
-def _require_lane_free(ctx: AppContext, lane: Lane, set_id: int, exclusive: bool = False) -> None:
+def _require_lane_free(ctx: AppContext, lane: JobLane, set_id: int, exclusive: bool = False) -> None:
     """409 before any other check: the lane is taken, or a clashing job of the other lane is on this set."""
     try:
         ctx.runner.check(lane, set_id, exclusive)

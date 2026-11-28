@@ -112,7 +112,7 @@ async def test_live_real_phone():
 async def test_history_kept_between_items():
     """Real app sometimes keeps the chat when the sheet is reopened."""
     app = FakeApp(keep_history=True)
-    first = await one(app)
+    await one(app)
     app.transcript = "bật đèn trần"
     second = await one(app)
     assert second.text == "bật đèn trần"
@@ -120,7 +120,7 @@ async def test_history_kept_between_items():
 
 async def test_history_kept_and_app_auto_stopped():
     app = FakeApp(keep_history=True, auto_stop=True)
-    first = await one(app)
+    await one(app)
     app.transcript = "bật đèn trần"
     second = await one(app)
     assert second.text == "bật đèn trần"

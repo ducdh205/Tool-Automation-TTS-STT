@@ -21,6 +21,7 @@ import { DevicePanel } from "./components/DevicePanel";
 import { PairTabs } from "./components/PairTabs";
 import { ExportZipDialog, type ZipAudio } from "./components/ExportZipDialog";
 import { clickRow, emptySelection, prune, toggleAllVisible, type Selection } from "./selection";
+import { useToast } from "./useToast";
 
 function countBy<T>(rows: Iterable<T>, key: (r: T) => string | undefined): Record<string, number> {
   const out: Record<string, number> = {};
@@ -51,7 +52,7 @@ export default function App() {
   const [filter, setFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
   const [dialog, setDialog] = useState<"import" | "zip" | null>(null);
-  const [toast, setToast] = useState<{ text: string; kind: "info" | "error" } | null>(null);
+  const { toast, notify } = useToast();
   const [settings, setSettings] = useState<Settings | null>(null);
   const [settingsLoadFailed, setSettingsLoadFailed] = useState(false);
   const [settingsSaving, setSettingsSaving] = useState(false);
@@ -68,10 +69,6 @@ export default function App() {
   const finishedJobs = useRef(new Set<string>());
   setIdRef.current = setId;
 
-  const notify = (text: string, kind: "info" | "error" = "info") => {
-    setToast({ text, kind });
-    window.setTimeout(() => setToast(null), 6000);
-  };
   // 422 = "nothing to do" (e.g. Verify with no generated audio): information, not a failure.
   const notifyError = (e: unknown) =>
     notify((e as Error).message, e instanceof ApiError && e.status === 422 ? "info" : "error");

@@ -67,6 +67,19 @@ async def test_crash_becomes_error_event():
     assert r.busy() is None
 
 
+async def test_task_cancelled_frees_the_lane():
+    """A job whose task is cancelled (server shutdown) must not stay "running" forever."""
+    r = JobRunner()
+    r.start("a", lambda emit, cancel: slow_job(emit, cancel, steps=50))
+    await asyncio.sleep(0.01)
+    task = r._jobs[r.busy()["id"]]["task"]
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert r.busy() is None
+    r.start("b", lambda emit, cancel: slow_job(emit, cancel, steps=1))  # the lane is free again
+
+
 async def test_unsubscribe():
     r = JobRunner()
     q = r.subscribe()

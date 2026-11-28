@@ -1,7 +1,6 @@
 """Block 2 on two phones at once: one playback per sentence, retries only where needed."""
 
 import asyncio
-from pathlib import Path
 
 import pytest
 
@@ -150,6 +149,20 @@ async def test_cancel_stops_both(env):
     assert events[-1].kind == "cancelled"
     assert status(store, a)[1:] == [AppStatus.PENDING.value] * 2
     assert status(store, b)[1:] == [AppStatus.PENDING.value] * 2
+
+
+async def test_cancel_during_last_sentence_ends_cancelled(tmp_path):
+    store, a, b, settings = make_env(tmp_path, ["bật đèn"])
+    cancel = asyncio.Event()
+    inner = scripted_attempt({}, "bật đèn")
+
+    async def attempt(lanes, wav, player, checks):
+        cancel.set()  # Dừng pressed while the only (= last) sentence plays
+        return await inner(lanes, wav, player, checks)
+
+    events = await go(store, [Lane(a, object())], settings, attempt, cancel=cancel)
+    assert events[-1].kind == "cancelled"
+    assert status(store, a) == [AppStatus.PASSED.value]  # its answer is still kept
 
 
 async def test_resume_lanes_with_different_pending(env):

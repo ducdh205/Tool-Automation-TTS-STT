@@ -16,7 +16,7 @@ from typing import Any
 import openpyxl
 from openpyxl import Workbook
 from openpyxl.drawing.image import Image as XlImage
-from openpyxl.styles import Alignment, PatternFill
+from openpyxl.styles import Alignment
 from openpyxl.utils import get_column_letter, range_boundaries
 
 from tts_stt_tool.report.excel import BOLD, HEADER_FILL, _app_overview, format_ops

@@ -472,8 +472,8 @@ def default_attempt(profile: AppProfile, sleep: Sleep = asyncio.sleep) -> Attemp
                     raise base
                 return await read_result(lanes[i].dev, profile, base, logs[i], sleep, checks[i])
 
-            reads = await asyncio.gather(*(read(i, b) for i, b in zip(live, bases)), return_exceptions=True)
-            for i, r in zip(live, reads):
+            reads = await asyncio.gather(*(read(i, b) for i, b in zip(live, bases, strict=True)), return_exceptions=True)
+            for i, r in zip(live, reads, strict=True):
                 out[i] = r
         for i, o in enumerate(out):
             if isinstance(o, BaseException):
@@ -540,7 +540,7 @@ async def _tries(attempt: Attempt, todo: list[tuple[Lane, dict]], wav: Path, pla
     while active:
         outs = await attempt([todo[k][0] for k in active], wav, player, [checks[k] for k in active])
         retry: list[int] = []
-        for k, out in zip(active, outs):
+        for k, out in zip(active, outs, strict=True):
             lane = todo[k][0]
             logs[k].extend(out.log if isinstance(out, AppCapture) else (getattr(out, "log", None) or []))
             if cancel.is_set():
@@ -609,7 +609,7 @@ async def run_block2_multi(
         if cancel.is_set():
             emit(ProgressEvent("", "cancelled", done, total))
             return
-        todo = [(lane, p[item_id]) for lane, p in zip(lanes, pending) if item_id in p]
+        todo = [(lane, p[item_id]) for lane, p in zip(lanes, pending, strict=True) if item_id in p]
         first = todo[0][1]
         label = f"[{done + 1}/{total}] {first['tc_id']}"
         emit(ProgressEvent("", "log", done, total, message=f"{label}: {first['text_tts']}",
@@ -618,7 +618,7 @@ async def run_block2_multi(
         thresholds = [(store.get_app_run(lane.run_id) or {}).get("wer_threshold", 0.0) for lane, _ in todo]
         checks: list[Check] = [
             (lambda heard, t=row["text_tts"], th=th: compare(t, heard, th).correct) if lane.shots_dir else None
-            for (lane, row), th in zip(todo, thresholds)]
+            for (lane, row), th in zip(todo, thresholds, strict=True)]
         if not first["audio_path"] or not Path(first["audio_path"]).is_file():
             outs: list[AppCapture | BaseException] = [
                 OperationError("Không có file audio của câu này (chạy lại Khối 1)") for _ in todo]
@@ -627,7 +627,7 @@ async def run_block2_multi(
                                 pause, label, tag, done, total)
 
         stop: tuple[Lane, str] | None = None
-        for (lane, row), out, th in zip(todo, outs, thresholds):
+        for (lane, row), out, th in zip(todo, outs, thresholds, strict=True):
             if isinstance(out, BaseException):
                 lane.op_errors += 1
                 msg = str(out) or type(out).__name__
@@ -661,4 +661,7 @@ async def run_block2_multi(
             emit(ProgressEvent("", "error", done + 1, total,
                                message=f"Dừng sau {MAX_CONSECUTIVE_OP_ERRORS} lỗi thao tác liên tiếp{where}: {msg}"))
             return
+    if cancel.is_set():  # Dừng pressed during the last sentence: its answers are kept, the run is not done
+        emit(ProgressEvent("", "cancelled", total, total))
+        return
     emit(ProgressEvent("", "done", total, total))
