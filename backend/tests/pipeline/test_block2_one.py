@@ -385,3 +385,60 @@ async def test_phases_compose_like_run_one():
     cap = await read_result(app, prof, base, log, no_sleep, None)
     assert cap.text == app.transcript
     assert app.taps == ref.taps
+
+
+# --- speed: the next sentence taps the remembered mic, checked by the cheap mic state ------
+async def test_next_sentence_taps_remembered_mic_without_a_dump():
+    app = FakeApp()
+    await one(app)
+    first = app.dumps
+    app.dumps = 0
+    cap = await one(app)
+    assert cap.text == "chỉnh nhiệt độ ghế lái lên 24 độ"
+    assert app.dumps == first - 1  # no "are we home?" dump
+    assert any("vị trí lần trước" in line for line in cap.log)
+    assert app.taps[-3:] == ["Nói để tạo việc", "Dừng nghe", "BACK"]
+
+
+async def test_remembered_mic_after_task_form_and_discard():
+    app = FakeApp(form_after_speech=True)
+    await one(app)
+    cap = await one(app)
+    assert cap.text == "chỉnh nhiệt độ ghế lái lên 24 độ"
+    assert any("vị trí lần trước" in line for line in cap.log)
+    assert app.drafts == 0 and app.state == "home"
+
+
+async def test_remembered_mic_miss_falls_back_to_reading_the_screen():
+    app = FakeApp()
+    await one(app)
+    app.state = "form"  # something left a task form open: the remembered spot is not the mic
+    cap = await one(app)
+    assert cap.text == "chỉnh nhiệt độ ghế lái lên 24 độ"
+    assert any("đọc lại màn hình" in line for line in cap.log)
+    assert app.drafts == 0 and app.state == "home"
+
+
+async def test_failed_sentence_does_not_reuse_the_spot():
+    app = FakeApp()
+    await one(app)
+    app.sheet_opens = False
+    with pytest.raises(OperationError):
+        await one(app)
+    app.sheet_opens = True
+    cap = await one(app)
+    assert not any("vị trí lần trước" in line for line in cap.log)
+
+
+async def test_iphone_always_reads_the_screen():
+    app = FakeApp()
+    app.fast_ui = True  # iPhone: a dump is cheap, and there is no mic state to check the tap with
+    await one(app)
+    cap = await one(app)
+    assert not any("vị trí lần trước" in line for line in cap.log)
+
+
+async def test_log_has_phase_timings():
+    cap = await one(FakeApp())
+    for phase in ("chuẩn bị", "phát", "đọc kết quả", "đóng"):
+        assert any(line.startswith("⏱") and phase in line for line in cap.log), phase

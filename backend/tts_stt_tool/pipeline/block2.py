@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import weakref
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -193,18 +194,21 @@ DISCARD_WAIT_S = 3.0
 FORM_WAIT_S = 2.5  # iOS: how long a chat bubble may wait for the task form that follows it
 
 
-async def _discard_form(dev: DeviceDriver, p: AppProfile, log: list[str], sleep: Sleep) -> None:
+async def _discard_form(dev: DeviceDriver, p: AppProfile, log: list[str], sleep: Sleep) -> bool:
     """After Back on the task form: confirm "Bỏ thay đổi" so the next sentence starts clean.
 
-    Best effort — if the dialog does not show, ``ensure_home`` deals with it next time.
+    Best effort — if the dialog does not show, ``ensure_home`` deals with it next time. Its spot
+    is read from a fresh dump, never remembered: tapped before the dialog shows, it would land
+    on a chip of the form. True once the button was tapped.
     """
     if not p.discard_label:
-        return
+        return False
     nodes = await _wait_for(dev, p.discard_label, DISCARD_WAIT_S, sleep)
     if nodes is None:
         log.append(f"Không thấy nút '{p.discard_label}' sau Back")
-        return
+        return False
     await _tap(dev, find(nodes, p.discard_label), log)  # type: ignore[arg-type]
+    return True
 
 
 async def run_one(
@@ -228,15 +232,74 @@ async def run_one(
         raise
 
 
+QUICK_MIC_S = 2.5  # how long a tap on the remembered mic spot may take to bring the mic up
+
+# Per phone: where the home mic was, and whether the last sentence closed cleanly back to home.
+# Only a clean close (and a phone whose mic state can confirm the tap) lets the next sentence skip
+# its ~2.5 s "are we home?" dump.
+_SPOTS: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+_AT_HOME = object()
+
+
+def _spots(dev: DeviceDriver) -> dict:
+    try:
+        return _SPOTS.setdefault(dev, {})
+    except TypeError:  # a driver that cannot be weakly referenced: no memory, always read the screen
+        return {}
+
+
+def _elapsed(log: list[str], phase: str, since: float) -> None:
+    log.append(f"⏱ {phase} {asyncio.get_running_loop().time() - since:.1f}s")
+
+
+async def _mic_up_within(dev: DeviceDriver, timeout_s: float, sleep: Sleep) -> bool:
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout_s
+    for _ in range(max(1, int(timeout_s / MIC_POLL_S))):
+        if await dev.mic_active():
+            return True
+        if loop.time() >= deadline:
+            break
+        await sleep(MIC_POLL_S)
+    return False
+
+
+async def _quick_open(dev: DeviceDriver, p: AppProfile, log: list[str], sleep: Sleep) -> bool:
+    """Tap the mic where it was last time; True once the mic state confirms it is listening.
+
+    Only right after a clean close (the phone is on the home screen) and on a phone that reports
+    its mic state (Android); otherwise, or when the mic does not come up, the caller reads the
+    screen as usual — any screen the tap may have opened is backed out of there.
+    """
+    spots = _spots(dev)
+    spot = spots.get(p.open_label) if spots.pop(_AT_HOME, False) else None
+    if spot is None or getattr(dev, "fast_ui", False):
+        return False
+    log.append(f"Bấm '{p.open_label}' {spot} (vị trí lần trước)")
+    await dev.tap(*spot)
+    if await _mic_up_within(dev, QUICK_MIC_S, sleep):
+        log.append("Mic đã bật")
+        return True
+    log.append("Mic chưa bật → đọc lại màn hình")
+    spots.pop(p.open_label, None)
+    return False
+
+
 async def prepare(dev: DeviceDriver, p: AppProfile, log: list[str], sleep: Sleep) -> None:
     """Phase 1: from wherever the app is to a live mic, ready for the audio."""
-    home = await ensure_home(dev, p, log, sleep)
-    await _tap(dev, find(home, p.open_label), log)  # type: ignore[arg-type]
+    t0 = asyncio.get_running_loop().time()
+    if not await _quick_open(dev, p, log, sleep):
+        home = await ensure_home(dev, p, log, sleep)
+        mic = find(home, p.open_label)
+        await _tap(dev, mic, log)  # type: ignore[arg-type]
+        if not getattr(dev, "fast_ui", False):
+            _spots(dev)[p.open_label] = mic.center  # type: ignore[union-attr]
 
-    # The mic goes live 0.6-1+ s after the tap (audio before that is lost) and the app gives up
-    # after ~3 s of silence; a UI dump costs ~2.5 s, so watch the mic via dumpsys (~0.1 s).
-    await _wait_mic(dev, p, log, sleep)
+        # The mic goes live 0.6-1+ s after the tap (audio before that is lost) and the app gives up
+        # after ~3 s of silence; a UI dump costs ~2.5 s, so watch the mic via dumpsys (~0.1 s).
+        await _wait_mic(dev, p, log, sleep)
     await sleep(p.pre_delay_s)
+    _elapsed(log, "chuẩn bị", t0)
 
 
 async def speak(devs: list[DeviceDriver], wav: Path, player: AudioPlayer,
@@ -248,12 +311,15 @@ async def speak(devs: list[DeviceDriver], wav: Path, player: AudioPlayer,
     """
     tasks = [asyncio.create_task(dev.nodes()) for dev in devs]
     await asyncio.sleep(0)
+    t0 = asyncio.get_running_loop().time()
     for log in logs:
         log.append(f"Phát {Path(wav).name}")
     try:
         await asyncio.to_thread(player.play, wav)
     finally:
         bases = await asyncio.gather(*tasks, return_exceptions=True)
+    for log in logs:
+        _elapsed(log, "phát", t0)
     return list(bases)
 
 
@@ -271,6 +337,7 @@ async def read_result(dev: DeviceDriver, p: AppProfile, base: list[UiNode], log:
     """Phase 3: stop listening, read what the app heard, photograph a wrong answer, close the sheet."""
     if not _sheet_open(base, p):
         raise OperationError(f"Bảng '{p.sheet_label or p.close_label}' không mở")
+    t0 = asyncio.get_running_loop().time()
     before = bubble_labels(base, dev.screen_w)
     before_heard = heard_text(base, p.heard_prefix)  # a form left open must not count as new
     await sleep(p.post_delay_s)
@@ -323,6 +390,8 @@ async def read_result(dev: DeviceDriver, p: AppProfile, base: list[UiNode], log:
             if not _sheet_open(later, p):
                 break
 
+    _elapsed(log, "đọc kết quả", t0)
+    t0 = asyncio.get_running_loop().time()
     bubbles = bubble_labels(nodes, dev.screen_w)
     shot = None
     if is_correct is not None and not is_correct(text or ""):
@@ -331,8 +400,10 @@ async def read_result(dev: DeviceDriver, p: AppProfile, base: list[UiNode], log:
     # ~2.5 s old dump can land on the "Thử nói" suggestion and open a task form.
     log.append("Back (đóng bảng)")
     await dev.back()
-    if on_form:
-        await _discard_form(dev, p, log, sleep)
+    home = await _discard_form(dev, p, log, sleep) if on_form else True
+    if home:
+        _spots(dev)[_AT_HOME] = True
+    _elapsed(log, "đóng", t0)
     return AppCapture(text=text, log=log, bubbles=bubbles, screenshot=shot, not_heard=not_heard)
 
 

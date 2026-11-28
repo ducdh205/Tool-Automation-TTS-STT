@@ -28,7 +28,7 @@ class AppProfile:
     # the sentence is then spoken once more. Empty = do not watch for it.
     not_heard_label: str = "Chưa nghe rõ"
     pre_delay_s: float = 0.3  # after the mic is live
-    post_delay_s: float = 1.0
+    post_delay_s: float = 0.5  # after the audio ends, before tapping stop (lets the app catch the tail)
     listen_timeout_s: float = 6.0
     result_timeout_s: float = 10.0
     between_delay_s: float = 0.0  # pause after one sentence before speaking the next

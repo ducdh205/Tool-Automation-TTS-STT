@@ -53,7 +53,10 @@ class FakeApp:
         self.screencap_error: Exception | None = None
 
     # -- DeviceDriver ----------------------------------------------------------
+    dumps = 0  # nodes() calls by the tool (a real dump costs ~2.5 s)
+
     async def nodes(self) -> list[UiNode]:
+        self.dumps += 1
         if self.state == "listening" and not self.played and self.silence_dumps is not None:
             self._silent += 1
             if self._silent > self.silence_dumps:
@@ -94,6 +97,7 @@ class FakeApp:
 
     async def tap(self, x: int, y: int) -> None:
         hit = [n for n in await self.nodes() if n.contains(x, y) and n.cls.endswith("Button")]
+        self.dumps -= 1  # the fake looking up what was hit is not a tool dump
         label = hit[0].label if hit else f"({x},{y})"
         self.taps.append(label)
         if label == "Nói để tạo việc" and self.sheet_opens:
