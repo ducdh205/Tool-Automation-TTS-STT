@@ -7,6 +7,7 @@ Folder layout (built by packaging/build.ps1), next to this file:
     backend/tts_stt_tool/      the tool's source
     frontend/dist/             built web UI
     vendor/platform-tools/     adb
+    vendor/scrcpy/             scrcpy-server (live Android screen, optional)
     vendor/go-ios/             go-ios (iPhone list, port forward)
     ios/WDA.ipa                WebDriverAgent to sideload on each iPhone (see HUONG-DAN-IPHONE.txt)
     vendor/wyoming-vietnamese/ wyoming source (STT)

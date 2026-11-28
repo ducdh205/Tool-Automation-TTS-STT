@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { startMirror, streamSupported, type StreamSession } from "../scrcpy";
 import { Icon } from "./Icon";
 import { IosConnectBox } from "./IosConnect";
 import { api, type AppProfile, type DeviceInfo, type DeviceInputBody, type DeviceKey, type DeviceStatus, type UiNodeInfo } from "../api";
@@ -30,21 +31,103 @@ function useDeviceStatus(): DeviceStatus | null {
   return status;
 }
 
-/** Live-ish screen: fetch the next screencap as soon as the previous one has loaded. */
-/** Map a pointer position on an object-fit:contain <img> to device pixels (null = outside the picture). */
-function toDevice(img: HTMLImageElement, clientX: number, clientY: number): { x: number; y: number } | null {
-  const r = img.getBoundingClientRect();
-  const nw = img.naturalWidth, nh = img.naturalHeight;
+/** Pointer position on an object-fit:contain picture of nw x nh -> picture pixels (null = outside it). */
+function toPicture(el: HTMLElement, nw: number, nh: number, clientX: number, clientY: number): { x: number; y: number } | null {
+  const r = el.getBoundingClientRect();
   if (!nw || !nh) return null;
   const scale = Math.min(r.width / nw, r.height / nh);
   const ox = r.left + (r.width - nw * scale) / 2, oy = r.top + (r.height - nh * scale) / 2;
   const x = (clientX - ox) / scale, y = (clientY - oy) / scale;
   if (x < 0 || y < 0 || x >= nw || y >= nh) return null;
-  return { x: Math.round(x), y: Math.round(y) };
+  return { x, y };
 }
 
-function PhoneScreen({ serial, onInput }: { serial: string; onInput: (b: DeviceInputBody) => void }) {
+type ToDevice = (el: HTMLElement, clientX: number, clientY: number) => { x: number; y: number } | null;
+
+/** Tap (moved < 6 px) or swipe on the picture, sent in phone pixels. */
+function usePointerInput(toDevice: ToDevice, onInput: (b: DeviceInputBody) => void) {
   const down = useRef<{ x: number; y: number; cx: number; cy: number; t: number } | null>(null);
+  return {
+    onPointerDown: (e: React.PointerEvent<HTMLElement>) => {
+      const p = toDevice(e.currentTarget, e.clientX, e.clientY);
+      if (!p) return;
+      e.currentTarget.setPointerCapture(e.pointerId);
+      down.current = { ...p, cx: e.clientX, cy: e.clientY, t: performance.now() };
+    },
+    onPointerUp: (e: React.PointerEvent<HTMLElement>) => {
+      const start = down.current;
+      down.current = null;
+      if (!start) return;
+      const moved = Math.hypot(e.clientX - start.cx, e.clientY - start.cy);
+      if (moved < 6) {
+        onInput({ action: "tap", x: start.x, y: start.y });
+        return;
+      }
+      const el = e.currentTarget;
+      const r = el.getBoundingClientRect();
+      // clamp the end point into the picture so swipes that leave it still count
+      const end = toDevice(el, Math.min(Math.max(e.clientX, r.left), r.right - 1),
+        Math.min(Math.max(e.clientY, r.top), r.bottom - 1)) ?? start;
+      const ms = Math.round(Math.min(Math.max(performance.now() - start.t, 100), 2000));
+      onInput({ action: "swipe", x: start.x, y: start.y, x2: end.x, y2: end.y, duration_ms: ms });
+    },
+    onPointerCancel: () => { down.current = null; },
+  };
+}
+
+function Waiting({ error }: { error?: string | null }) {
+  return (
+    <div className="phone-empty">
+      <div className="phone-icon">⏳</div>
+      <b>{error ? "Không chụp được màn hình" : "Đang lấy màn hình…"}</b>
+      {error && <span className="muted small">{error}</span>}
+    </div>
+  );
+}
+
+/** Android: live scrcpy mirror; iPhone, no WebCodecs, or a failed stream: screenshots. */
+function PhoneScreen({ serial, ios, onInput }: { serial: string; ios: boolean; onInput: (b: DeviceInputBody) => void }) {
+  const [fallback, setFallback] = useState<string | null>(null);
+  useEffect(() => setFallback(null), [serial]);
+  if (!ios && streamSupported() && fallback === null)
+    return <MirrorScreen key={serial} serial={serial} onInput={onInput} onFail={setFallback} />;
+  return <PollScreen serial={serial} onInput={onInput} />;
+}
+
+function MirrorScreen({ serial, onInput, onFail }: {
+  serial: string; onInput: (b: DeviceInputBody) => void; onFail: (reason: string) => void;
+}) {
+  const canvas = useRef<HTMLCanvasElement>(null);
+  const session = useRef<StreamSession | null>(null);
+  const [live, setLive] = useState(false);
+  useEffect(() => {
+    if (!canvas.current) return;
+    return startMirror(serial, canvas.current, {
+      onSession: (s) => { session.current = s; },
+      onLive: () => setLive(true),
+      onFail,
+    });
+  }, [serial, onFail]);
+  const pointer = usePointerInput((el, cx, cy) => {
+    const c = el as HTMLCanvasElement, s = session.current;
+    const p = toPicture(c, c.width, c.height, cx, cy);
+    if (!p || !s) return null;
+    // stream pixels -> phone pixels (the server scales the stream down)
+    const x = Math.min(Math.round(p.x * s.device_width / c.width), s.device_width - 1);
+    const y = Math.min(Math.round(p.y * s.device_height / c.height), s.device_height - 1);
+    return { x, y };
+  }, onInput);
+  return (
+    <>
+      <canvas ref={canvas} className="phone-img interactive" style={live ? undefined : { display: "none" }}
+        aria-label="Màn hình điện thoại" {...pointer} />
+      {!live && <Waiting />}
+    </>
+  );
+}
+
+/** Live-ish screen: fetch the next screencap as soon as the previous one has loaded. */
+function PollScreen({ serial, onInput }: { serial: string; onInput: (b: DeviceInputBody) => void }) {
   const [src, setSrc] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const urlRef = useRef<string | null>(null);
@@ -78,46 +161,14 @@ function PhoneScreen({ serial, onInput }: { serial: string; onInput: (b: DeviceI
     };
   }, [serial]);
 
+  const pointer = usePointerInput((el, cx, cy) => {
+    const img = el as HTMLImageElement;
+    const p = toPicture(img, img.naturalWidth, img.naturalHeight, cx, cy);
+    return p && { x: Math.round(p.x), y: Math.round(p.y) };
+  }, onInput);
   if (src)
-    return (
-      <img
-        className="phone-img interactive"
-        src={src}
-        alt="Màn hình điện thoại"
-        draggable={false}
-        onPointerDown={(e) => {
-          const p = toDevice(e.currentTarget, e.clientX, e.clientY);
-          if (!p) return;
-          e.currentTarget.setPointerCapture(e.pointerId);
-          down.current = { ...p, cx: e.clientX, cy: e.clientY, t: performance.now() };
-        }}
-        onPointerUp={(e) => {
-          const start = down.current;
-          down.current = null;
-          if (!start) return;
-          const moved = Math.hypot(e.clientX - start.cx, e.clientY - start.cy);
-          if (moved < 6) {
-            onInput({ action: "tap", x: start.x, y: start.y });
-            return;
-          }
-          const img = e.currentTarget;
-          const r = img.getBoundingClientRect();
-          // clamp the end point into the picture so swipes that leave it still count
-          const end = toDevice(img, Math.min(Math.max(e.clientX, r.left), r.right - 1),
-            Math.min(Math.max(e.clientY, r.top), r.bottom - 1)) ?? start;
-          const ms = Math.round(Math.min(Math.max(performance.now() - start.t, 100), 2000));
-          onInput({ action: "swipe", x: start.x, y: start.y, x2: end.x, y2: end.y, duration_ms: ms });
-        }}
-        onPointerCancel={() => { down.current = null; }}
-      />
-    );
-  return (
-    <div className="phone-empty">
-      <div className="phone-icon">⏳</div>
-      <b>{error ? "Không chụp được màn hình" : "Đang lấy màn hình…"}</b>
-      {error && <span className="muted small">{error}</span>}
-    </div>
-  );
+    return <img className="phone-img interactive" src={src} alt="Màn hình điện thoại" draggable={false} {...pointer} />;
+  return <Waiting error={error} />;
 }
 
 function Empty({ title, hint }: { title: string; hint: string }) {
@@ -214,7 +265,7 @@ export function DevicePanel({ jobLogs = [], profile = null, onProfileSaved, seri
   else if (current.state === "unauthorized")
     screen = <Empty title="Chờ cho phép trên điện thoại" hint="Mở khóa điện thoại và bấm “Cho phép” gỡ lỗi USB." />;
   else if (current.state !== "device") screen = <Empty title={STATE_LABEL[current.state] ?? current.state} hint="Thử rút ra cắm lại cáp." />;
-  else screen = <PhoneScreen serial={current.serial} onInput={send} />;
+  else screen = <PhoneScreen serial={current.serial} ios={ios} onInput={send} />;
 
   return (
     <aside className="device">

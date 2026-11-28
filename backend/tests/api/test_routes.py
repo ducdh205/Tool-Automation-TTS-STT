@@ -559,3 +559,12 @@ def test_import_manifest_with_unusable_value_is_422_not_500(client):
     r = import_set_zip(client, buf.getvalue())
     assert r.status_code == 422 and "tc_id" in r.json()["detail"]
     assert client.get("/api/audio-sets").json() == []
+
+
+def test_device_stream_reports_error_when_scrcpy_missing(client, monkeypatch):
+    from tts_stt_tool.device import scrcpy
+
+    monkeypatch.setattr(scrcpy.ScrcpyStream, "available", staticmethod(lambda: False))
+    with client.websocket_connect("/ws/device/S1/stream") as ws:
+        msg = ws.receive_json()
+    assert msg["type"] == "error"

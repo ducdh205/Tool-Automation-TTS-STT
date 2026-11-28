@@ -92,6 +92,12 @@ Không cài gì lên điện thoại (chỉ dùng `adb` có sẵn của Android)
 
 1. Tải [Android platform-tools](https://developer.android.com/tools/releases/platform-tools) và giải nén vào
    `vendor/platform-tools/` (cần `adb.exe`).
+   Tuỳ chọn, để màn hình mượt (H.264 ~30 fps thay vì chụp ảnh liên tục): tải
+   [scrcpy-server-v5.0.1](https://github.com/Genymobile/scrcpy/releases/download/v5.0.1/scrcpy-server-v5.0.1)
+   (sha256 `764eb6f79811d5211fe9df341120882ba9994c7a61b897d7bf3fb662e53bc536`) về thành `vendor/scrcpy/scrcpy-server`. Đúng bản 5.0.1, vì giao thức đổi theo phiên bản.
+   File chỉ được đẩy tạm vào `/data/local/tmp` khi đang xem màn hình, chạy chế độ chỉ xem (không audio,
+   không điều khiển, không đụng clipboard và nguồn màn hình). Không có file này, hoặc trình duyệt không hỗ trợ
+   WebCodecs, thì tool tự dùng ảnh chụp như cũ. iPhone luôn dùng ảnh chụp.
 2. Trên điện thoại: bật **Tùy chọn nhà phát triển → Gỡ lỗi USB**, cắm cáp, bấm **Cho phép**.
    Cột phải của tool hiện màn hình điện thoại (chạm/vuốt được).
 3. Mở app cần test ở **màn hình chính**. Đặt âm lượng loa máy tính ~70%, điện thoại cách loa 20–40 cm,

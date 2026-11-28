@@ -126,9 +126,6 @@ foreach ($d in 'runtime', 'backend', 'frontend', 'vendor', 'ios', 'launch.py', '
     $p = Join-Path $Stage $d
     if (Test-Path $p) { Remove-Item $p -Recurse -Force }
 }
-# Models from an older build layout (build\stage): move them instead of downloading again.
-$oldModels = Join-Path $Build 'stage\models'
-if ((Test-Path $oldModels) -and -not (Test-Path "$Stage\models")) { Move-Item $oldModels "$Stage\models" }
 
 # --- 3. runtimes ----------------------------------------------------------------------------
 New-Runtime '3.12' (Join-Path $Stage 'runtime\py312') $Root
@@ -140,7 +137,13 @@ New-Runtime '3.14.8' (Join-Path $Stage 'runtime\py314') $Wy @('--find-links', 'h
 Write-Step 'Copy mã nguồn, giao diện, adb, go-ios, wyoming'
 Copy-Tree "$Root\backend\tts_stt_tool" "$Stage\backend\tts_stt_tool" @('__pycache__')
 Copy-Tree "$Root\frontend\dist" "$Stage\frontend\dist"
-Copy-Tree "$Root\vendor\platform-tools" "$Stage\vendor\platform-tools"
+# platform-tools: only adb + its USB DLLs (fastboot, sqlite3, mke2fs... are never used).
+New-Item -ItemType Directory -Force "$Stage\vendor\platform-tools" | Out-Null
+foreach ($f in 'adb.exe', 'AdbWinApi.dll', 'AdbWinUsbApi.dll', 'NOTICE.txt') {
+    Copy-Item "$Root\vendor\platform-tools\$f" "$Stage\vendor\platform-tools\$f"
+}
+# scrcpy-server (optional): live Android mirror; without it the screen falls back to screenshots.
+if (Test-Path "$Root\vendor\scrcpy\scrcpy-server") { Copy-Tree "$Root\vendor\scrcpy" "$Stage\vendor\scrcpy" }
 # go-ios: only the program + its tunnel driver (selfIdentity.plist is this machine's pairing identity).
 New-Item -ItemType Directory -Force "$Stage\vendor\go-ios", "$Stage\ios" | Out-Null
 Copy-Item "$Root\vendor\go-ios\ios.exe", "$Root\vendor\go-ios\wintun.dll" "$Stage\vendor\go-ios"
